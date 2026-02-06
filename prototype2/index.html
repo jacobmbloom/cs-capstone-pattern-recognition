@@ -1,0 +1,195 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Document</title>
+
+    <style>
+        :root {
+            /* Monotone grayscale palette */
+            --bg-900: #1e1f22;  /* page background */
+            --bg-800: #2a2b2f;  /* nav / card base */
+            --bg-700: #34363b;  /* buttons / table base */
+            --bg-600: #3f4147;  /* hover / row alt */
+            --bg-500: #4a4d54;  /* accents */
+            --fg-100: #e6e6e6;  /* primary text */
+            --fg-200: #cfcfcf;  /* secondary text */
+        }
+
+        body {
+            background-color: var(--bg-900);
+            margin: 0;
+            color: var(--fg-100);
+            font-family: system-ui, sans-serif;
+        }
+
+        nav {
+            height: 7.5vh;
+            background-color: var(--bg-800);
+            display: flex;
+            align-items: center;
+        }
+
+        nav button {
+            height: 100%;
+            width: 10vw;
+            border: none;
+            background-color: var(--bg-700);
+            margin-left: 2.5vw;
+            color: var(--fg-100);
+            font-size: x-large;
+            cursor: pointer;
+        }
+
+        nav button:hover {
+            background-color: var(--bg-600);
+        }
+
+        #card-holder {
+            padding: 1vw;
+        }
+
+        .card {
+            background-color: var(--bg-800);
+            border-radius: 2vw;
+            color: var(--fg-100);
+        }
+
+        .card h1
+        {
+            text-align: center;
+        }
+
+        #import-card {
+            width: 20vw;
+            height: 20vw;
+            margin: 1vw;
+            padding: 1vw;
+        }
+
+        .inset-table {
+            margin: auto;
+            width: 90%;
+            border-collapse: collapse;
+            background-color: var(--bg-700);
+            border-radius: 1.5vw;
+            overflow: hidden;
+
+            box-shadow:
+                inset 0 3px 5px rgba(0,0,0,0.85),   /* top shadow */
+                inset 0 -2px 3px rgba(255,255,255,0.12); /* bottom highlight */
+        }
+
+
+
+        .inset-table th,
+        .inset-table td {
+            padding: 0.75rem 1rem;
+            border-bottom: 1px solid var(--bg-600);
+            color: var(--fg-200);
+            height:2vh;
+        }
+
+        .inset-table th {
+            color: var(--fg-100);
+            font-weight: 600;
+        }
+
+        tr:first {
+            font-weight: bold;
+        }
+
+        tr:nth-child(even) {
+            background-color: var(--bg-600);
+        }
+
+        .inset-table tbody tr:last-child td {
+            border-bottom: none;
+        }
+
+        #import-card button
+        {
+            height: 10%;
+            width: 50%;
+            position:relative;
+            left:25%;
+            margin-bottom: 5%;
+            font-size: large;
+        }
+    </style>
+</head>
+<body>
+    <nav>
+        <button>Import</button>
+        <button>Export</button>
+    </nav>
+
+    <div id="card-holder">
+        <div id="import-card" class="card">
+            <button onclick="addFiles()">Add Files</button>
+            <table class="inset-table" id="file-table">
+                <tbody>
+                    <tr>
+                        <th>File name</th>
+                        <th></th>
+                    </tr>
+                </tbody>
+            </table>
+        </div>
+    </div>
+
+    <script>
+        let file_list = []
+
+        function addFiles()
+        {
+            var input = document.createElement('input');
+            input.type = 'file';
+            input.multiple = true;
+            
+
+            input.onchange = e => { 
+                file_list.concat(e.target.files)
+                handleFiles(); 
+            }
+
+            input.click();
+        }
+
+        function handleFiles()
+        {
+            let file_table = document.getElementById("file-table")
+            var new_tbody = document.createElement('tbody');
+
+            var row = new_tbody.insertRow(-1);
+            var cell1 = row.insertCell(0);
+            var cell2 = row.insertCell(1);
+
+            cell1.innerText = "File Name";
+            cell2.innerHTML = "";
+
+            for (const file of file_list)
+            {
+                var row = new_tbody.insertRow(-1);
+                var cell1 = row.insertCell(0);
+                var cell2 = row.insertCell(1);
+
+                cell1.innerText = file.name;
+                cell2.innerHTML = "<button>del</button>";
+            }
+
+            while (new_tbody.rows.length < 7)
+            {
+                var row = new_tbody.insertRow(-1);
+                var cell1 = row.insertCell(0);
+                var cell2 = row.insertCell(1);
+            }
+
+            file_table.replaceChild(new_tbody, file_table.childNodes[1])
+        }
+
+        handleFiles()
+    </script>
+</body>
+</html>
