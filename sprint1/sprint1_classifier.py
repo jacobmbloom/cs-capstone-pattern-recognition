@@ -18,10 +18,10 @@ train_data_directory ="Cars_Body_Type/train"
 test_data_directory ="Cars_Body_Type/test"
 valid_data_directory ="Cars_Body_Type/valid"
 
-image_size = 224
+image_size = 244
 batch_size = 32
 seed = 123
-epochs = 150
+epochs = 25
 
 
 #----------------------------------------------------
@@ -60,41 +60,6 @@ for images, labels in train_ds.take(1):
         plt.axis("off")
 plt.show()
 '''
-#----------------------------------------------------
-# create data augmentation layer to get a larger dataset if needed
-#----------------------------------------------------
-
-data_augmentation_layers = [
-    layers.RandomFlip("horizontal"),
-    layers.RandomRotation(0.1),
-]
-
-
-def data_augmentation(images):
-    for layer in data_augmentation_layers:
-        images = layer(images)
-    return images
-
-
-#----------------------------------------------------
-# test data augmentation with visualization
-#----------------------------------------------------
-'''
-plt.figure(figsize=(10, 10))
-for images, _ in train_ds.take(1):
-    for i in range(9):
-        augmented_images = data_augmentation(images)
-        ax = plt.subplot(3, 3, i + 1)
-        plt.imshow(np.array(augmented_images[0]).astype("uint8"))
-        plt.axis("off")
-plt.show()
-'''
-#----------------------------------------------------
-# apply data augmentation to our image dataset
-#----------------------------------------------------
-
-augmented_ds = train_ds.map(lambda x, y: (data_augmentation(x), y))
-
 
 #----------------------------------------------------
 # normalizing images
@@ -103,7 +68,6 @@ augmented_ds = train_ds.map(lambda x, y: (data_augmentation(x), y))
 rescaler = layers.Rescaling(1./255)
 
 # for training can either use augmented ds for larger dataset, or just regular train ds
-augmented_ds = augmented_ds.map(lambda x, y: (rescaler(x), y))
 train_ds = train_ds.map(lambda x, y: (rescaler(x), y))
 test_ds = test_ds.map(lambda x, y: (rescaler(x), y))
 valid_ds = valid_ds.map(lambda x, y: (rescaler(x), y))

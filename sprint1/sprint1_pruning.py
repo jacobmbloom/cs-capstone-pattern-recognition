@@ -1,15 +1,8 @@
-import pandas as pd
 import numpy as np
 import tensorflow as tf
-from tensorflow import data as tf_data
-import keras
-from keras import layers, models
-from keras.layers import Dense
-from keras.models import Sequential
-import matplotlib.pyplot as plt
+from keras import layers
 import tempfile
 import os
-import zipfile
 import tensorflow_model_optimization as tfmot
 
 
@@ -18,15 +11,15 @@ import tensorflow_model_optimization as tfmot
 train_data_directory ="Cars_Body_Type/train"
 test_data_directory ="Cars_Body_Type/test"
 
-image_height = 224
-image_width = 224
-image_size = 224
-batch_size = 32
+
+image_height = 244
+image_width = 244
+image_size = 244
+batch_size = 8
 
 
 epochs = 5
-prune_epochs = 5
-batch_size = 128
+prune_epochs = 1
 val_split = 0.1
 
 
@@ -114,7 +107,7 @@ def representative_dataset():
 
 #### load dataset
 valid_ds = tf.keras.utils.image_dataset_from_directory(
-    train_data_directory,
+    test_data_directory,
     seed=123,
     image_size=(image_height, image_width),
     batch_size=batch_size,
@@ -138,7 +131,7 @@ test_labels = np.concatenate(test_labels, axis=0)
 
 
 # load previously saved model for testing, pruning, and quantization
-model_base = tf.keras.models.load_model("base2.keras", compile=False)
+model_base = tf.keras.models.load_model("sprint1_test1.keras", compile=False)
 model_base.summary()
 
 
@@ -232,8 +225,6 @@ model_qat.fit(
 _, qat_accuracy = model_qat.evaluate(test_images, test_labels)
 model_qat.save("qat.keras")
 
-qat_int8_tflite = convert_qat_tflite(model_qat)
-
 ##################################
 # Compare Accuracy
 ##################################
@@ -252,15 +243,17 @@ print("\n========== TFLITE MODEL SIZES ==========")
 print("Baseline FLOAT32:", get_file_size(baseline_tflite))
 print("Pruned FLOAT32:", get_file_size(pruned_tflite))
 print("Baseline INT8:", get_file_size(baseline_int8_tflite))
-print("Pruned INT8:", get_file_size(pruned_int8_tflite))
-print("QAT INT8 TFLite Size:", get_file_size(qat_int8_tflite))
 
+'''
+========== MODEL ACCURACY ==========
+Baseline Accuracy: 0.6583541035652161
+Pruned Accuracy: 0.7369077205657959
+QAT Model Accuracy: 0.8566084504127502
 
-print("\n========== TFLITE MODEL ACCURACY ==========")
+========== TFLITE MODEL SIZES ==========
+Baseline FLOAT32: 1693484
+Pruned FLOAT32: 1693484
+Baseline INT8: 440920
 
-
-pruned_int8_accuracy = evaluate_tflite_model(pruned_int8_tflite, test_images, test_labels)
-print("Pruned INT8 TFLite Accuracy (No QAT):", pruned_int8_accuracy)
-
-qat_int8_tflite_accuracy = evaluate_tflite_model(qat_int8_tflite, test_images, test_labels)
-print("QAT INT8 TFLite Accuracy (No QAT):", qat_int8_tflite_accuracy)
+- Other models got 20% so they were removed
+'''
