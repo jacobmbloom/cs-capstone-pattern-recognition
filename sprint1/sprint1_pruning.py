@@ -11,17 +11,14 @@ import tensorflow_model_optimization as tfmot
 train_data_directory ="Cars_Body_Type/train"
 test_data_directory ="Cars_Body_Type/test"
 
-
 image_height = 244
 image_width = 244
 image_size = 244
-batch_size = 8
+batch_size = 32
 
-
-epochs = 5
-prune_epochs = 1
-val_split = 0.1
-
+epochs = 15
+prune_epochs = 75
+val_split = .1
 
 #### HELPER FUNCTIONS
 
@@ -106,7 +103,16 @@ def representative_dataset():
 
 
 #### load dataset
-valid_ds = tf.keras.utils.image_dataset_from_directory(
+train_ds = tf.keras.utils.image_dataset_from_directory(
+    train_data_directory,
+    seed=123,
+    image_size=(image_height, image_width),
+    batch_size=batch_size,
+    label_mode="int"
+)
+
+
+test_ds = tf.keras.utils.image_dataset_from_directory(
     test_data_directory,
     seed=123,
     image_size=(image_height, image_width),
@@ -116,28 +122,38 @@ valid_ds = tf.keras.utils.image_dataset_from_directory(
 
 # normalize data
 rescaler = layers.Rescaling(1./255, input_shape=(image_size,image_size,3))
-valid_ds = valid_ds.map(lambda x, y: (rescaler(x), y))
+
+train_ds = train_ds.map(lambda x, y: (rescaler(x), y))
+test_ds = test_ds.map(lambda x, y: (rescaler(x), y))
 
 # convert dataset to arrays for functions
+train_images = []
+train_labels = []
+
 test_images = []
 test_labels = []
 
-for images, labels in valid_ds:
+for images, labels in train_ds:
+    train_images.append(images.numpy())
+    train_labels.append(labels.numpy())
+
+for images, labels in test_ds:
     test_images.append(images.numpy())
     test_labels.append(labels.numpy())
 
+train_images = np.concatenate(train_images, axis=0)
+train_labels = np.concatenate(train_labels, axis=0)
+
 test_images = np.concatenate(test_images, axis=0)
 test_labels = np.concatenate(test_labels, axis=0)
-
 
 # load previously saved model for testing, pruning, and quantization
 model_base = tf.keras.models.load_model("sprint1_test1.keras", compile=False)
 model_base.summary()
 
-
 model_base.compile(optimizer='adam', loss=tf.keras.losses.SparseCategoricalCrossentropy(from_logits=True), metrics=['accuracy'])
 
-loss, accuracy = model_base.evaluate(valid_ds)
+loss, accuracy = model_base.evaluate(test_ds)
 print("test accuracy: ", accuracy)
 
 prune_low_magnitude = tfmot.sparsity.keras.prune_low_magnitude
@@ -169,7 +185,7 @@ callbacks = [tfmot.sparsity.keras.UpdatePruningStep()]
 print("----------------- FIT PRUNING MODEL -----------")
 
 #Fine tuning
-model_pruned.fit(test_images, test_labels,
+model_pruned.fit(train_images, train_labels,
                  batch_size=batch_size,
                  epochs=prune_epochs,
                  validation_split=val_split,
@@ -215,7 +231,7 @@ print("----------------- FIT QAT MODEL -----------")
 
 # Fine-tune QAT model (short training is usually enough)
 model_qat.fit(
-    test_images, test_labels,
+    train_images, train_labels,
     batch_size=batch_size,
     epochs=epochs,
     validation_split=val_split
@@ -224,6 +240,23 @@ model_qat.fit(
 # Evaluate QAT model
 _, qat_accuracy = model_qat.evaluate(test_images, test_labels)
 model_qat.save("qat.keras")
+
+
+# Convert to int8 tflite
+
+converter = tf.lite.TFLiteConverter.from_keras_model(model_qat)
+converter.optimizations = [tf.lite.Optimize.DEFAULT]
+tflite_model = converter.convert()
+
+with open('qat_8int.tflite', 'wb') as f:
+    f.write(tflite_model)
+
+
+model = 'qat_8int.tflite'
+
+int8_qat_accuracy = evaluate_tflite_model(model, test_images, test_labels)
+
+
 
 ##################################
 # Compare Accuracy
@@ -234,6 +267,8 @@ print("\n========== MODEL ACCURACY ==========")
 print("Baseline Accuracy:", baseline_accuracy)
 print("Pruned Accuracy:", pruned_accuracy)
 print("QAT Model Accuracy:", qat_accuracy)
+print("INT8 Model Accuracy:", int8_qat_accuracy)
+
 
 ##################################
 # Compare Sizes
