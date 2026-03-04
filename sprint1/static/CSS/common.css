@@ -1,0 +1,186 @@
+:root {
+    --main-background: #20292a;          /* dark slate */
+    --secondary-background: #344b5b;     /* muted navy */
+    --nav-buttons: #51798a;               /* steel blue */
+    --nav-button-hover: #86a4b5;          /* light steel blue */
+
+    /* New additions */
+    --accent-light: #7fbcd2;              /* soft cyan/teal */
+    --accent-dark: #1f3a47;               /* deep teal for shadows */
+    --highlight: #f2c14e;                 /* warm gold highlight */
+    --warning: #e07b7b;                   /* muted red for alerts */
+    --success: #7bd77d;                   /* soft green for success */
+    --card-background: #2b3e50;           /* slightly lighter card bg */
+    --border-color: #4a6575;              /* subtle border accent */
+    --text-primary: #ffffff;              /* main text */
+    --text-secondary: #cbd4dc;            /* muted secondary text */
+}
+
+body
+{
+    margin: 0;
+    background-color: var(--main-background);
+    min-height: 100vh;
+}
+
+body nav
+{
+    height: 7.5vh;
+    background-color: var(--secondary-background);
+    display: flex;
+}
+
+.nav-button
+{
+    padding: 0 1.5vw;
+    height: 100%;
+    font-size: xx-large;
+    font-weight: bold;
+    background-color: var(--nav-buttons);
+    border: none;
+    color: white;
+}
+
+.nav-button:hover
+{
+    background-color: var(--nav-button-hover);
+}
+
+.card {
+    min-width: 30vw;
+    height: 100%;
+
+    display: flex;
+    flex-direction: column;
+    align-items: center; 
+    
+    background-color: var(--secondary-background);
+    margin: 2.5vw;
+    padding: 1vw;
+    border-radius: 2.5vw;
+    color: white;
+}
+
+.card-title
+{
+    font-size: xx-large;
+    text-align: center;
+    padding: 0;
+    margin: 0 0 1vh 0;
+    height: min-content;
+
+    flex-basis: 100%;
+}
+
+.card-row
+{
+    margin: auto;
+}
+
+.card-scroll-box
+{
+    width:100%;
+    height: calc((1.5rem + 1.5vh) * 16);
+    
+    overflow-y: auto;
+    overflow-x: hidden;
+    
+    position: relative;
+    top: 0;
+    left: 0;
+
+    margin: 0 2vw 1vh;
+    background-color: var(--card-background);
+    border-radius: .75vw;
+
+    -ms-overflow-style: none;  /* IE and Edge */
+    scrollbar-width: none;     /* Firefox */;
+}
+
+.card-scroll-box-shadow
+{
+    width: 100%;
+    height: 100%;
+
+    position: relative;
+    top: 0;
+    left: 0;
+
+    z-index:999;
+
+    background-color: transparent;
+    box-shadow: inset 0 4px 8px rgba(0, 0, 0, 0.6),  /* inner shadow for depth */
+                inset 0 -4px 8px rgba(0, 0, 0, 0.4); /* subtle bottom shading */
+
+    border: 1px solid rgba(255, 255, 255, 0.05);
+}
+
+.card-scroll-box::-webkit-scrollbar {
+  display: none;             /* Chrome, Safari, Opera, Edge */
+}
+
+
+.app
+{
+    display: flex;
+}
+
+img
+{
+    width:50vw;
+    height:30vw;
+}
+
+
+
+#file-table {
+    position: relative;
+
+    top: 0;
+    left: 0;
+
+    width: 100%;
+    height:100%;
+    border-collapse: collapse;
+}
+
+#file-table th, #file-table td {
+    padding: 0.5vh 1vw 1vh 2vw;
+    text-align: left;
+    color: var(--text-primary);
+}
+
+#file-table tbody tr:nth-child(even) {
+    background-color: #1b2a34;
+}
+
+#file-table tbody tr:nth-child(odd) {
+    background-color: #243741;
+}
+
+/* missing file highlight remains */
+#file-table tbody tr.file-missing {
+    color: var(--warning);
+}
+
+#file-table button {
+    padding: 0.25vw 1vw;
+    background-color: var(--nav-buttons);
+    border: none;
+    border-radius: 0.3vw;
+    color: var(--text-primary);
+    cursor: pointer;
+}
+
+#file-table button:hover {
+    background-color: var(--nav-button-hover);
+}
+
+#file-table tbody tr td {
+    height: 1.5rem;
+}
+
+.file-missing td
+{
+    color: var(--warning) !important;
+}
