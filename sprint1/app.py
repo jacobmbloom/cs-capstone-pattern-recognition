@@ -15,7 +15,7 @@ import time
 app = Flask(__name__)
 app.secret_key = "your_very_secret_and_unique_key"
 
-socketio = SocketIO(app, cors_allowed_origins="*", async_mode="eventlet")
+socketio = SocketIO(app, cors_allowed_origins="*")
 
 UPLOAD_DIR = "uploads"
 RESULT_DIR = "results"
@@ -71,17 +71,31 @@ def process(img_path : str, final_path : str):
                 crop = np.expand_dims(crop, axis=0)
 
                 prediction = model.predict(crop)
-
+                class_id = np.argmax(prediction)
                 confidence = np.max(prediction)
-
+                predicted_label = class_names[class_id]
                 print(prediction)
 
-                if confidence > 0.8:
-                    cv2.rectangle(img_rgb, (x1, y1), (x2, y2), (0,255,0), 3)
 
-    cv2.imshow("Cars", cv2.cvtColor(img_rgb, cv2.COLOR_RGB2BGR))
-    cv2.waitKey(0)
-    cv2.destroyAllWindows()
+                cv2.rectangle(img_rgb, (x1, y1), (x2, y2), (0,255,0), 3)
+                # Create display text
+                display_text = f"{predicted_label}: {confidence * 100:.1f}%"
+
+                # Put label above box
+                cv2.putText(
+                    img_rgb,
+                    display_text,
+                    (x1, y1-10),
+                    cv2.FONT_HERSHEY_SIMPLEX,
+                    0.7,
+                    (0, 255, 0),
+                    2,
+                    cv2.LINE_AA
+                )
+
+    #cv2.imshow("Cars", cv2.cvtColor(img_rgb, cv2.COLOR_RGB2BGR))
+    #cv2.waitKey(0)
+    #cv2.destroyAllWindows()
 
     cv2.imwrite(final_path,  cv2.cvtColor(img_rgb, cv2.COLOR_RGB2BGR))
 
@@ -98,7 +112,7 @@ def checkDependancies(path: str):
     return list(df["filename"].unique())
 
 
-def runPatternRecognition(files: list[str], sid: str):
+def runPatternRecognition(files: list, sid: str):
     """
     Background worker tied to socket session.
     Emits progress updates to the correct client.
@@ -106,8 +120,8 @@ def runPatternRecognition(files: list[str], sid: str):
 
     for i, file in enumerate(files):
         process(
-            os.path.join(UPLOAD_DIR, sid_directory_map[sid], file),
-            os.path.join(RESULT_DIR, sid_directory_map[sid], file)
+            os.path.join(file),
+            os.path.join(file)
         )
 
         socketio.emit(
@@ -192,7 +206,7 @@ def media_post():
 @app.route("/results/<path:filename>")
 def get_file(filename):
     return send_from_directory(
-        os.path.join(RESULT_DIR, session["fileDirectory"]),
+        os.path.join(UPLOAD_DIR, session["fileDirectory"]),
         filename
     )
 
@@ -265,4 +279,4 @@ def handle_processing(data):
     socketio.start_background_task(runPatternRecognition, files, sid)
 
 if __name__ == "__main__":
-    socketio.run(app, debug=True)
+    socketio.run(app, debug=True, allow_unsafe_werkzeug=True)
