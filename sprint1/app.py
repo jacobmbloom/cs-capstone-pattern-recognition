@@ -54,6 +54,15 @@ def process(img_path : str, final_path : str):
     img = cv2.imread(img_path)
     img_rgb = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
 
+    new_size = (1280, 720)
+    duplicated_image = img_rgb.copy()
+    resized_duplicate = cv2.resize(duplicated_image, new_size, interpolation=cv2.INTER_LINEAR)
+
+    orig_h, orig_w = img_rgb.shape[:2]
+
+    scale_x = new_size[0] / orig_w
+    scale_y = new_size[1] / orig_h
+
     # Detect objects
     results = detector(img)
 
@@ -73,31 +82,31 @@ def process(img_path : str, final_path : str):
                 prediction = model.predict(crop)
                 class_id = np.argmax(prediction)
                 confidence = np.max(prediction)
-                predicted_label = class_names[class_id]
+
                 print(prediction)
 
+                new_x1 = int(x1 * scale_x)
+                new_y1 = int(y1 * scale_y)
+                new_x2 = int(x2 * scale_x)
+                new_y2 = int(y2 * scale_y)
 
-                cv2.rectangle(img_rgb, (x1, y1), (x2, y2), (0,255,0), 3)
-                # Create display text
+                cv2.rectangle(resized_duplicate, (new_x1, new_y1), (new_x2, new_y2), (0,255,0), 3)
+
+                predicted_label = class_names[class_id]
                 display_text = f"{predicted_label}: {confidence * 100:.1f}%"
 
-                # Put label above box
                 cv2.putText(
-                    img_rgb,
+                    resized_duplicate,
                     display_text,
-                    (x1, y1-10),
+                    (new_x1, new_y1 - 10),
                     cv2.FONT_HERSHEY_SIMPLEX,
-                    0.7,
+                    0.9,   # slightly bigger font for larger image
                     (0, 255, 0),
                     2,
                     cv2.LINE_AA
                 )
 
-    #cv2.imshow("Cars", cv2.cvtColor(img_rgb, cv2.COLOR_RGB2BGR))
-    #cv2.waitKey(0)
-    #cv2.destroyAllWindows()
-
-    cv2.imwrite(final_path,  cv2.cvtColor(img_rgb, cv2.COLOR_RGB2BGR))
+            cv2.imwrite(final_path, cv2.cvtColor(resized_duplicate, cv2.COLOR_RGB2BGR))
 
 
 def checkDependancies(path: str):
@@ -112,7 +121,7 @@ def checkDependancies(path: str):
     return list(df["filename"].unique())
 
 
-def runPatternRecognition(files: list, sid: str):
+def runPatternRecognition(files, sid: str):
     """
     Background worker tied to socket session.
     Emits progress updates to the correct client.
@@ -121,7 +130,7 @@ def runPatternRecognition(files: list, sid: str):
     for i, file in enumerate(files):
         process(
             os.path.join(file),
-            os.path.join(file)
+            os.path.join(RESULT_DIR, sid_directory_map[sid], os.path.basename(file))
         )
 
         socketio.emit(
@@ -193,6 +202,7 @@ def media_post():
     saved_files = []
 
     for f in files:
+        print(f.filename)
         if not f.filename:
             continue
 
@@ -206,7 +216,7 @@ def media_post():
 @app.route("/results/<path:filename>")
 def get_file(filename):
     return send_from_directory(
-        os.path.join(UPLOAD_DIR, session["fileDirectory"]),
+        os.path.join(RESULT_DIR, session["fileDirectory"]),
         filename
     )
 
@@ -279,4 +289,4 @@ def handle_processing(data):
     socketio.start_background_task(runPatternRecognition, files, sid)
 
 if __name__ == "__main__":
-    socketio.run(app, debug=True, allow_unsafe_werkzeug=True)
+    socketio.run(app, debug=True)
