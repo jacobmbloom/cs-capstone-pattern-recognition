@@ -21,7 +21,7 @@ valid_data_directory ="Cars_Body_Type/valid"
 image_size = 244
 batch_size = 32
 seed = 123
-epochs = 25
+epochs = 30
 
 
 #----------------------------------------------------

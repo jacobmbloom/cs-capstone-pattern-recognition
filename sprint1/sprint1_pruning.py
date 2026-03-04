@@ -16,8 +16,8 @@ image_width = 244
 image_size = 244
 batch_size = 32
 
-epochs = 15
-prune_epochs = 75
+epochs = 6
+prune_epochs = 50
 val_split = .1
 
 #### HELPER FUNCTIONS
@@ -163,8 +163,8 @@ end_step = steps_per_epoch * epochs
 
 pruning_params = {
     'pruning_schedule': tfmot.sparsity.keras.PolynomialDecay(
-        initial_sparsity=0.90,
-        final_sparsity=0.95,
+        initial_sparsity=0.4,
+        final_sparsity=0.65,
         begin_step=0,
         end_step=end_step
     )
@@ -282,13 +282,13 @@ print("Baseline INT8:", get_file_size(baseline_int8_tflite))
 '''
 ========== MODEL ACCURACY ==========
 Baseline Accuracy: 0.6583541035652161
-Pruned Accuracy: 0.7369077205657959
-QAT Model Accuracy: 0.8566084504127502
+Pruned Accuracy: 0.7431421279907227
+QAT Model Accuracy: 0.7331671118736267
+INT8 Model Accuracy: 0.2169576059850374
 
 ========== TFLITE MODEL SIZES ==========
 Baseline FLOAT32: 1693484
 Pruned FLOAT32: 1693484
 Baseline INT8: 440920
 
-- Other models got 20% so they were removed
 '''
