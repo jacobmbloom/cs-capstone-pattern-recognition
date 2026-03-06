@@ -7,5 +7,9 @@ western computer science capstone project
 3. `python3.8 app.py`
 
 ## How to use site
-- Importing files\
-  To import files click the import button on the import card
+  To import files click the "Add Files" button on the import card
+  <img width="1918" height="912" alt="image" src="https://github.com/user-attachments/assets/ac66f157-dc78-42c1-9099-cef8f6eebf57" />
+  After adding, click confirm to start processing files.
+  The processed images are then loaded on the right side.
+  Use the arrow buttons to move between them.
+
