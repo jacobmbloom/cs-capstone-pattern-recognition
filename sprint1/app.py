@@ -27,7 +27,6 @@ VALID_TYPES = [".csv", ".mp4", ".jpg", ".png"]
 # Map socket session ID to user directory
 sid_directory_map = {}
 
-
 ###########
 # Utility #
 ###########
@@ -159,10 +158,6 @@ def index():
 
     return render_template("index.html")
 
-@app.route("/files")
-def files():
-    return render_template("files.html")
-
 @app.route("/csv_post", methods=["POST"])
 def csv_post():
 
@@ -220,39 +215,6 @@ def get_file(filename):
         filename
     )
 
-##############
-# API Routes #
-##############
-
-@app.route("/api/upload", methods=["POST"])
-def upload():
-    """
-        Upload endpoint for file management
-        Can expect a single file in the "file" portion of request
-    """
-
-    #   Prevent user from accessing pages without regestering with server
-    #       Also ensures the user has a local directory
-    if "fileDirectory" not in session:
-        return redirect("/")
-
-    file = request.files.get("file")
-
-    if not file.filename:
-        return
-
-    if not any([file.filename.endswith(fileType) for fileType in VALID_TYPES]):
-        return
-
-    if file.filename.endswith(".csv"):
-        dependancies = checkDependancies()
-
-
-    path = os.path.join(UPLOAD_DIR, session["fileDirectory"], file.filename)
-    file.save(path)
-    return
-
-
 #################
 # Socket Events #
 #################
@@ -274,18 +236,7 @@ def handle_processing(data):
     if not files:
         emit("status", {"message": "No files provided"})
         return
-
-    """source_dir = os.path.join(UPLOAD_DIR, sid_directory_map[sid])
-    destination_dir = os.path.join(RESULT_DIR, sid_directory_map[sid])
-    try:
-        # This will copy the 'source_folder' directory *into* the 'destination_folder' path
-        shutil.copytree(source_dir, destination_dir, dirs_exist_ok=True)
-        print(f"Directory '{source_dir}' copied to '{destination_dir}'")
-    except FileExistsError:
-        print(f"Error: Destination directory '{destination_dir}' already exists.")
-    except Exception as e:
-        print(f"An error occurred: {e}")"""
-
+        
     socketio.start_background_task(runPatternRecognition, files, sid)
 
 if __name__ == "__main__":
