@@ -127,7 +127,7 @@ def checkDependancies(path: str):
 
     return list(df["filename"].unique())
 
-
+# processing worker, takes list of files and runs individual processing.
 def runPatternRecognition(files, sid: str):
     """
     Background worker tied to socket session.
@@ -140,6 +140,7 @@ def runPatternRecognition(files, sid: str):
             os.path.join(RESULT_DIR, sid_directory_map[sid], os.path.basename(file))
         )
 
+        #    Return the image path immediatly after it finishes processing
         socketio.emit(
             "status",
             {
@@ -157,6 +158,8 @@ def runPatternRecognition(files, sid: str):
 
 @app.route("/")
 def index():
+
+    #    Create personal upload and results directories and add the refrence to user session
     if "fileDirectory" not in session:
         session["fileDirectory"] = str(uuid.uuid4())
         usr_upload_dir = os.path.join(UPLOAD_DIR, session["fileDirectory"])
@@ -176,6 +179,7 @@ def csv_post():
 
     depencancies = {}
 
+    #    Download all the files to the user's local upload dir
     for f in files:
         if not f.filename:
             continue
@@ -184,6 +188,8 @@ def csv_post():
         os.makedirs(os.path.dirname(path), exist_ok=True)
         f.save(path)
 
+        #    Since this is a csv, it will depend on having other images/videos
+        #        Pass those results back as a json response from page
         depencancies[f.filename] = checkDependancies(path)
 
         if isinstance(depencancies[f.filename], str):
@@ -204,6 +210,7 @@ def media_post():
     files = request.files.getlist("files")
     saved_files = []
 
+    #    Download all the files into local user uploads dir
     for f in files:
         print(f.filename)
         if not f.filename:
@@ -214,8 +221,10 @@ def media_post():
         f.save(path)
         saved_files.append(path)
 
-    return {"saved": saved_files}
+    return {"saved": saved_files} #    Return all succsessful downloads
 
+#    Add an alias for getting result files
+#        This makes users only able to accsess their own results
 @app.route("/results/<path:filename>")
 def get_file(filename):
     return send_from_directory(
@@ -227,6 +236,7 @@ def get_file(filename):
 # Socket Events #
 #################
 
+#    Make sure the user session id is coppied over to the socket map
 @socketio.on("connect")
 def handle_connect():
     if "fileDirectory" in session:
@@ -236,6 +246,8 @@ def handle_connect():
 def handle_disconnect():
     sid_directory_map.pop(request.sid, None)
 
+#    Start async image processing so UI doesnt hang
+#        background task responsible for returning results to user
 @socketio.on("start_processing")
 def handle_processing(data):
     sid = request.sid
