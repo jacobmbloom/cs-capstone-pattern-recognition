@@ -1,17 +1,18 @@
-from ultralytics import YOLO
 import cv2
 import numpy as np
 import tensorflow as tf
-
-from flask import Flask, render_template, request, session, redirect, send_from_directory
-from flask_socketio import SocketIO, emit
 import pandas as pd
 import os
 import shutil
 import uuid
+
+from ultralytics import YOLO
+from flask import Flask, render_template, request, session, redirect, send_from_directory
+from flask_socketio import SocketIO, emit
 from datetime import datetime
 import time
 
+# Setup
 app = Flask(__name__)
 app.secret_key = "your_very_secret_and_unique_key"
 
@@ -27,11 +28,11 @@ VALID_TYPES = [".csv", ".mp4", ".jpg", ".png"]
 # Map socket session ID to user directory
 sid_directory_map = {}
 
-###########
-# Utility #
-###########
+#####################
+# Backend Functions #
+#####################
 
-
+# Model setup and use
 def process(img_path : str, final_path : str):
     class_names = [
         "Convertible",
@@ -50,9 +51,11 @@ def process(img_path : str, final_path : str):
     # Load your Keras classifier
     model = tf.keras.models.load_model("pruned.keras")
 
+    # Load the image
     img = cv2.imread(img_path)
-    img_rgb = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
 
+    # Parameter tune
+    img_rgb = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
     new_size = (1280, 720)
     duplicated_image = img_rgb.copy()
     resized_duplicate = cv2.resize(duplicated_image, new_size, interpolation=cv2.INTER_LINEAR)
@@ -65,25 +68,29 @@ def process(img_path : str, final_path : str):
     # Detect objects
     results = detector(img)
 
+    # Review results and give a classificaiton
     for result in results:
         for box in result.boxes:
             cls = int(box.cls[0])
             label = detector.names[cls]
 
+            # If yolo has decided the object in box is a car
             if label == "car":
+                # Map the box
                 x1, y1, x2, y2 = map(int, box.xyxy[0])
 
+                # Resize to avoid text size exploding on lower pixel images
                 crop = img_rgb[y1:y2, x1:x2]
                 crop = cv2.resize(crop, (244, 244))
                 crop = crop / 255.0
                 crop = np.expand_dims(crop, axis=0)
 
+                # Predict and store the most likely
                 prediction = model.predict(crop)
                 class_id = np.argmax(prediction)
                 confidence = np.max(prediction)
 
-                print(prediction)
-
+                # Setup and place box onto image
                 new_x1 = int(x1 * scale_x)
                 new_y1 = int(y1 * scale_y)
                 new_x2 = int(x2 * scale_x)
@@ -94,12 +101,13 @@ def process(img_path : str, final_path : str):
                 predicted_label = class_names[class_id]
                 display_text = f"{predicted_label}: {confidence * 100:.1f}%"
 
+                # Place classification onto box
                 cv2.putText(
                     resized_duplicate,
                     display_text,
                     (new_x1, new_y1 - 10),
                     cv2.FONT_HERSHEY_SIMPLEX,
-                    0.9,   # slightly bigger font for larger image
+                    0.9,
                     (0, 255, 0),
                     2,
                     cv2.LINE_AA
@@ -107,7 +115,7 @@ def process(img_path : str, final_path : str):
 
             cv2.imwrite(final_path, cv2.cvtColor(resized_duplicate, cv2.COLOR_RGB2BGR))
 
-
+# Check if file is found
 def checkDependancies(path: str):
     if not os.path.exists(path):
         return "File not found"
