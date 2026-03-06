@@ -4,14 +4,14 @@ western computer science capstone project
 ## How to run
 1. Install Python 3.8
 2. Install packages in requirements.txt
-    ultralytics \
-    opencv-python \
-    numpy \
-    tensorflow \
-    flask \
-    flask-socketio \
-    pandas 
-4. `python3.8 app.py`
+    - ultralytics
+    - opencv-python
+    - numpy
+    - tensorflow
+    - flask
+    - flask-socketio
+    - pandas 
+3. run `python3.8 app.py`
 
 ## How to use site
   To import files click the "Add Files" button on the import card
