@@ -11,6 +11,7 @@ import shutil
 import uuid
 from datetime import datetime
 import time
+import matplotlib.pyplot as plt
 
 app = Flask(__name__)
 app.secret_key = "your_very_secret_and_unique_key"
@@ -27,14 +28,13 @@ VALID_TYPES = [".csv", ".mp4", ".jpg", ".png"]
 # Map socket session ID to user directory
 sid_directory_map = {}
 
+# create data structure to store predictions
+prediction_log = []
 
-###########
-# Utility #
-###########
+GRAPH_DIR = "graphs"
+os.makedirs(GRAPH_DIR, exist_ok=True)
 
-
-def process(img_path : str, final_path : str):
-    class_names = [
+class_names = [
         "Convertible",
         "Coupe",
         "Hatchback",
@@ -43,6 +43,15 @@ def process(img_path : str, final_path : str):
         "SUV",
         "VAN"
         ]
+
+
+###########
+# Utility #
+###########
+
+
+def process(img_path : str, final_path : str):
+
 
 
     # Load YOLO car detector
@@ -76,6 +85,12 @@ def process(img_path : str, final_path : str):
                 predicted_label = class_names[class_id]
                 print(prediction)
 
+                # store predictions to data structure
+                prediction_log.append({
+                    "filename": os.path.basename(img_path),
+                    "label": predicted_label,
+                    "confidence": float(confidence)
+                })
 
                 cv2.rectangle(img_rgb, (x1, y1), (x2, y2), (0,255,0), 3)
                 # Create display text
@@ -132,7 +147,137 @@ def runPatternRecognition(files: list, sid: str):
             },
             room=sid
         )
+
+    plot_prediction_timeline()
+    plot_prediction_frequency()
+    plot_confidence_distribution()
+    plot_confidence_per_class()
+    plot_cumulative_classes()
+    plot_detections_per_image()
+
     socketio.emit("done", {}, room=sid)
+
+
+def plot_prediction_timeline(save_path="graphs/timeline.png"):
+    if not prediction_log:
+        print("No data to plot.")
+        return
+
+    df = pd.DataFrame(prediction_log)
+
+    # Create index (timeline)
+    df["index"] = range(len(df))
+
+    # Convert labels to numeric
+    label_map = {label: i for i, label in enumerate(df["label"].unique())}
+    df["label_id"] = df["label"].map(label_map)
+
+    plt.figure()
+    plt.scatter(df["index"], df["label_id"])
+
+    plt.yticks(list(label_map.values()), list(label_map.keys()))
+    plt.xlabel("Image Order")
+    plt.ylabel("Predicted Class")
+    plt.title("Prediction Timeline")
+
+    plt.savefig(save_path)   # better for Flask
+    plt.close()
+
+def plot_prediction_frequency(save_path="graphs/frequency_per_class.png"):
+    if not prediction_log:
+        print("No data to plot.")
+        return
+
+    df = pd.DataFrame(prediction_log)
+
+    car_counts = df['label'].value_counts()
+
+    plt.figure()
+    plt.bar(car_counts.index, car_counts.values)
+
+    plt.xlabel('car type')
+    plt.ylabel('car count')
+    plt.title('# of each car type')
+    plt.xticks(rotation=20)
+
+    plt.savefig(save_path)
+    plt.close()
+
+
+def plot_confidence_distribution(save_path="graphs/confidence_hist.png"):
+    if not prediction_log:
+        return
+
+    df = pd.DataFrame(prediction_log)
+
+    plt.figure()
+    plt.hist(df["confidence"], bins=20)
+
+    plt.xlabel("Confidence")
+    plt.ylabel("Frequency")
+    plt.title("Confidence Distribution")
+
+    plt.savefig(save_path)
+    plt.close()
+
+def plot_confidence_per_class(save_path="graphs/conf_per_class.png"):
+    if not prediction_log:
+        return
+
+    df = pd.DataFrame(prediction_log)
+
+    avg_conf = df.groupby("label")["confidence"].mean()
+
+    plt.figure()
+    plt.bar(avg_conf.index, avg_conf.values)
+
+    plt.xlabel("Car Type")
+    plt.ylabel("Avg Confidence")
+    plt.title("Average Confidence per Class")
+    plt.xticks(rotation=20)
+
+    plt.savefig(save_path)
+    plt.close()
+
+def plot_cumulative_classes(save_path="graphs/cumulative.png"):
+    if not prediction_log:
+        return
+
+    df = pd.DataFrame(prediction_log)
+
+    df["index"] = range(len(df))
+
+    for label in df["label"].unique():
+        mask = (df["label"] == label).astype(int)
+        cumulative = mask.cumsum()
+
+        plt.plot(df["index"], cumulative, label=label)
+
+    plt.xlabel("Image Index")
+    plt.ylabel("Cumulative Count")
+    plt.title("Cumulative Class Counts Over Time")
+    plt.legend()
+
+    plt.savefig(save_path)
+    plt.close()
+
+def plot_detections_per_image(save_path="graphs/detections_per_image.png"):
+    if not prediction_log:
+        return
+
+    df = pd.DataFrame(prediction_log)
+
+    counts = df.groupby("filename").size()
+
+    plt.figure()
+    plt.hist(counts, bins=10)
+
+    plt.xlabel("Detections per Image")
+    plt.ylabel("Frequency")
+    plt.title("Cars Detected per Image")
+
+    plt.savefig(save_path)
+    plt.close()
 
 
 ###############
