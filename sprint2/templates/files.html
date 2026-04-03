@@ -1,0 +1,111 @@
+{% extends "base.html" %}
+
+{% block title %}Files{% endblock %}
+
+{% block styles %}
+    <link rel="stylesheet" href="{{ url_for('static', filename='CSS/files.css') }}">
+{% endblock %}
+
+{% block content %}
+    <div class="main">
+        <div class="full-card">
+
+            <div class="drop-zone" id="drop-zone">
+                <div class="drop-zone-dashed"></div>
+                <div class="drop-icon">
+                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#3b82f6" stroke-width="2">
+                        <polyline points="16 16 12 12 8 16" />
+                        <line x1="12" y1="12" x2="12" y2="21" />
+                        <path d="M20.39 18.39A5 5 0 0 0 18 9h-1.26A8 8 0 1 0 3 16.3" />
+                    </svg>
+                </div>
+                <h3>Drag and drop your files here</h3>
+                <p>or click anywhere in this area to browse</p>
+                <div class="formats">
+                    <span class="format-tag">CSV</span>
+                    <span class="format-tag">MP4</span>
+                    <span class="format-tag">MOV</span>
+                    <span class="format-tag">JPG</span>
+                    <span class="format-tag">PNG</span>
+                    <span class="format-tag">WebM</span>
+                    <span class="format-tag">GIF</span>
+                </div>
+                <input type="file" id="file-input" multiple accept=".mp4,.mov,.jpg,.jpeg,.png,.webm,.gif,.csv" />
+            </div>
+
+            <div class="table-area">
+                <div class="table-toolbar">
+                    <div class="toolbar-left">
+                        <span class="file-count" id="file-count"><strong>0</strong> files</span>
+                        <button class="bulk-reprocess-btn" id="bulk-reprocess-btn" onclick="processSelected()">
+                            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                                stroke-width="2.5">
+                                <polyline points="1 4 1 10 7 10" />
+                                <path d="M3.51 15a9 9 0 1 0 .49-3.5" />
+                            </svg>
+                            Process selected
+                        </button>
+                        <button class="bulk-remove-btn" id="bulk-remove-btn" onclick="removeSelected()">
+                            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                                stroke-width="2.5">
+                                <polyline points="3 6 5 6 21 6" />
+                                <path d="M19 6l-1 14H6L5 6" />
+                                <path d="M10 11v6M14 11v6" />
+                            </svg>
+                            Remove selected
+                        </button>
+                    </div>
+                    <div style="display:flex;align-items:center;gap:16px;">
+                        <div class="search-box">
+                            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="#9a9a9a"
+                                stroke-width="2.5">
+                                <circle cx="11" cy="11" r="8" />
+                                <line x1="21" y1="21" x2="16.65" y2="16.65" />
+                            </svg>
+                            <input type="text" id="search-input" placeholder="Search files…" />
+                        </div>
+                        <button class="sort-btn" id="sort-btn" onclick="toggleSort()">
+                            Sort: Recently uploaded
+                            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                                stroke-width="2.5">
+                                <polyline points="6 9 12 15 18 9" />
+                            </svg>
+                        </button>
+                    </div>
+                </div>
+
+                <div class="table-head">
+                    <div id="select-all-cb" onclick="toggleSelectAll()"></div>
+                    <span></span>
+                    <span>Name</span>
+                    <span>Size</span>
+                    <span>Status</span>
+                    <span></span>
+                </div>
+
+                <div class="table-body" id="table-body"></div>
+            </div>
+
+            <div class="card-footer">
+                <span class="selected-info" id="selected-info">0 files selected</span>
+            </div>
+        </div>
+    </div>
+
+    <div class="modal-overlay" id="remove-modal">
+        <div class="modal-card">
+            <div class="modal-title">Remove files</div>
+            <div class="modal-body" id="modal-body"></div>
+            <div class="modal-actions" id="modal-actions"></div>
+        </div>
+    </div>
+    <div id="toast"></div>
+{% endblock %}
+
+{% block scripts %}
+    <script src="{{ url_for('static', filename='JS/files.js') }}"></script>
+    <script src="{{ url_for('static', filename='JS/newFiles.js') }}"></script>
+    <script>
+        document.getElementById("files-active").classList.add("active");
+    </script>
+{% endblock %}
