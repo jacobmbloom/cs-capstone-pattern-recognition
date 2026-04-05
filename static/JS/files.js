@@ -6,7 +6,7 @@
 //      For the most part, statuses move from left to right, one step at a time
 const STATUS_LABELS = { uploading: 'Uploading', waiting: 'Waiting', processing: 'Processing', ready: 'Ready', failed: 'Failed', missing: 'Missing' };
 
-const files = [];   //  List of all uploaded files, including placholders for missing
+let files = [];   //  List of all uploaded files, including placholders for missing
 //  Example entry:
 /*
     {
@@ -1145,3 +1145,18 @@ setInterval(() => {
             el.textContent = timeAgo(f.uploadedAt);
     });
 }, 15000);
+
+let toastTimer;
+/**
+ * Displays a small message at the bottom of the screen to show process was complete
+ * @param {String} message - The message to be printed out
+ * @returns 
+ */
+function showToast(message)
+{
+    const t = document.getElementById('toast');
+    t.textContent = message;
+    t.classList.add('show');
+    clearTimeout(toastTimer);
+    toastTimer = setTimeout(() => t.classList.remove('show'), 2200);
+}
