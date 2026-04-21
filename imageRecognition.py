@@ -284,6 +284,258 @@ def plot_detections_per_image(fileDirectory : str):
 
     return fig
 
+# plot all predictions found per image
+def plot_multiple_prediction_timeline(fileDirectory : str):
+    if fileDirectory not in prediction_log or not prediction_log[fileDirectory]:
+        return None
+
+    df = pd.DataFrame(prediction_log[fileDirectory])
+
+    # count each label per image
+    counts = df.groupby(["filename", "label"]).size().unstack(fill_value=0)
+
+    fig, ax = plt.subplots()
+
+    for label in counts.columns:
+        ax.plot(range(len(counts.index)), counts[label], marker="o", label=label)
+
+    ax.set_xlabel("Image Order")
+    ax.set_ylabel("Detections")
+    ax.legend()
+
+    return fig
+
+
+### get patterns from detections ###
+
+# get patterns like 3+ in a row of the same type of car
+
+def get_repetition_patterns(fileDirectory : str):
+    if fileDirectory not in prediction_log or not prediction_log[fileDirectory]:
+        return None
+
+    df = pd.DataFrame(prediction_log[fileDirectory])
+
+    labels = df["label"].tolist()
+
+    patterns = []
+    current_label = labels[0]
+    count = 1
+    start_index = 0
+
+    for i in range(1, len(labels)):
+        if labels[i] == current_label:
+            count += 1
+        else:
+            if count >= 3:
+                patterns.append({
+                    "label": current_label,
+                    "count": count,
+                    "start_index": start_index,
+                    "end_index": i - 1
+                })
+            current_label = labels[i]
+            count = 1
+            start_index = i
+
+    # final check
+    if count >= 3:
+        patterns.append({
+            "label": current_label,
+            "count": count,
+            "start_index": start_index,
+            "end_index": len(labels) - 1
+        })
+
+    return patterns
+
+
+def plot_repetition_patterns(fileDirectory : str):
+    patterns = get_repetition_patterns(fileDirectory)
+
+    if not patterns:
+        return None
+
+    fig, ax = plt.subplots()
+
+    y_labels = []
+    y_pos = []
+
+    for i, p in enumerate(patterns):
+        ax.barh(i, p["count"], left=p["start_index"])
+        y_labels.append(p["label"])
+        y_pos.append(i)
+
+    ax.set_yticks(y_pos)
+    ax.set_yticklabels(y_labels)
+    ax.set_xlabel("Timeline Index")
+    ax.set_ylabel("Repeated Car Type")
+    ax.set_title("Repetition Patterns (3+ in a Row)")
+
+    return fig
+
+
+# patterns over course of time.
+# ie same type of car at the same time of day
+# ex: theres an suv roughly every 3 photos
+
+def get_occurrence_patterns(fileDirectory : str):
+    if fileDirectory not in prediction_log or not prediction_log[fileDirectory]:
+        return None
+
+    df = pd.DataFrame(prediction_log[fileDirectory])
+
+    results = {}
+
+    for label in df["label"].unique():
+        indices = df.index[df["label"] == label].tolist()
+
+        if len(indices) < 3:
+            continue
+
+        gaps = np.diff(indices)
+
+        if len(gaps) == 0:
+            continue
+
+        avg_gap = round(np.mean(gaps), 2)
+
+        results[label] = {
+            "occurrences": len(indices),
+            "average_gap": avg_gap,
+            "indices": indices
+        }
+
+    return results
+
+def plot_occurrence_patterns(fileDirectory : str):
+    patterns = get_occurrence_patterns(fileDirectory)
+
+    if not patterns:
+        return None
+
+    labels = list(patterns.keys())
+    counts = [patterns[x]["occurrences"] for x in labels]
+    gaps = [patterns[x]["average_gap"] for x in labels]
+
+    fig, ax1 = plt.subplots()
+
+    ax1.bar(labels, counts)
+    ax1.set_ylabel("Occurrences")
+    ax1.set_xlabel("Car Type")
+
+    ax2 = ax1.twinx()
+    ax2.plot(labels, gaps, marker="o")
+    ax2.set_ylabel("Average Gap")
+
+    ax1.set_title("Occurrence Patterns")
+
+    return fig
+
+
+def plot_occurrence_timeline(fileDirectory : str):
+    patterns = get_occurrence_patterns(fileDirectory)
+
+    if not patterns:
+        return None
+
+    fig, ax = plt.subplots()
+
+    labels = list(patterns.keys())
+
+    for i, label in enumerate(labels):
+        x = patterns[label]["indices"]
+        y = [i] * len(x)
+        ax.scatter(x, y, s=80, label=label)
+
+    ax.set_yticks(range(len(labels)))
+    ax.set_yticklabels(labels)
+    ax.set_xlabel("Timeline Index")
+    ax.set_ylabel("Car Type")
+    ax.set_title("Occurrence Positions")
+    ax.legend()
+
+    return fig
+
+
+
+# patterns like the same sequence occuring multiple times in a row
+# ie same sequecne of van suv tuck over and over
+# or hackback pickup over and over
+
+def get_sequential_patterns(fileDirectory : str):
+    if fileDirectory not in prediction_log or not prediction_log[fileDirectory]:
+        return None
+
+    df = pd.DataFrame(prediction_log[fileDirectory])
+
+    labels = df["label"].tolist()
+
+    found_patterns = []
+
+    max_len = min(5, len(labels) // 2)
+
+    for seq_len in range(2, max_len + 1):
+        seen = {}
+
+        for i in range(len(labels) - seq_len + 1):
+            seq = tuple(labels[i:i + seq_len])
+
+            if seq not in seen:
+                seen[seq] = []
+
+            seen[seq].append(i)
+
+        for seq, positions in seen.items():
+            if len(positions) >= 2:
+                found_patterns.append({
+                    "sequence": list(seq),
+                    "count": len(positions),
+                    "positions": positions
+                })
+
+    return found_patterns
+
+def plot_sequential_patterns(fileDirectory : str):
+    patterns = get_sequential_patterns(fileDirectory)
+
+    if not patterns:
+        return None
+
+    # keep top 10 most common
+    patterns = sorted(patterns, key=lambda x: x["count"], reverse=True)[:10]
+
+    labels = [" -> ".join(p["sequence"]) for p in patterns]
+    counts = [p["count"] for p in patterns]
+
+    fig, ax = plt.subplots(figsize=(10,6))
+
+    ax.barh(range(len(labels)), counts)
+
+    ax.set_yticks(range(len(labels)))
+    ax.set_yticklabels(labels)
+    ax.set_xlabel("Times Repeated")
+    ax.set_title("Top Sequential Patterns")
+
+    return fig
+
+def plot_sequential_timeline(fileDirectory : str):
+    patterns = get_sequential_patterns(fileDirectory)
+
+    if not patterns:
+        return None
+
+    patterns = sorted(patterns, key=lambda x: x["count"], reverse=True)[:8]
+
+    fig, ax = plt.subplots(figsize=(10,6))
+
+    for i, p in enumerate(patterns):
+        ax.scatter(
+            p["positions"],
+            [i] * len(p["positions"]),
+            s=80
+        )
+
 def export_predictions(fileDirectory : str):
     output = StringIO()
     df = pd.DataFrame(prediction_log[fileDirectory])
