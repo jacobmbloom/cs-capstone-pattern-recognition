@@ -3,6 +3,7 @@
 {% block title %}Files{% endblock %}
 
 {% block styles %}
+    <link rel="stylesheet" href="{{ url_for('static', filename='CSS/visuals.css') }}">
     <link rel="stylesheet" href="{{ url_for('static', filename='CSS/files.css') }}">
 {% endblock %}
 
@@ -11,43 +12,94 @@
         <div class="column">
             <div class="card">
                 <h2 class="card-title">Prediction Timeline</h2>
-                <img src="{{ url_for('get_plot', plotname='plot_prediction_timeline') }}">
+                <div class="img-wrapper">
+                    <div class="img-placeholder"><div class="spinner"></div>Generating chart…</div>
+                    <img class="plot-img" data-src="{{ url_for('get_plot', plotname='plot_prediction_timeline') }}">
+                </div>
             </div>
             <div class="card">
                 <h2 class="card-title">Average Confidence per Class</h2>
-                <img src="{{ url_for('get_plot', plotname='plot_confidence_per_class') }}">
+                <div class="img-wrapper">
+                    <div class="img-placeholder"><div class="spinner"></div>Generating chart…</div>
+                    <img class="plot-img" data-src="{{ url_for('get_plot', plotname='plot_confidence_per_class') }}">
+                </div>
+            </div>
+            <div class="card">
+                <h2 class="card-title">Repetition Patterns (3+ in a Row)</h2>
+                <div class="img-wrapper">
+                    <div class="img-placeholder"><div class="spinner"></div>Generating chart…</div>
+                    <img class="plot-img" data-src="{{ url_for('get_plot', plotname='plot_repetition_patterns') }}">
+                </div>
+            </div>
+            <div class="card">
+                <h2 class="card-title">Occurrence Patterns</h2>
+                <div class="img-wrapper">
+                    <div class="img-placeholder"><div class="spinner"></div>Generating chart…</div>
+                    <img class="plot-img" data-src="{{ url_for('get_plot', plotname='plot_occurrence_patterns') }}">
+                </div>
             </div>
         </div>
         <div class="column">
             <div class="card">
                 <h2 class="card-title">Number of Each Car Type</h2>
-                <img src="{{ url_for('get_plot', plotname='plot_prediction_frequency') }}">
+                <div class="img-wrapper">
+                    <div class="img-placeholder"><div class="spinner"></div>Generating chart…</div>
+                    <img class="plot-img" data-src="{{ url_for('get_plot', plotname='plot_prediction_frequency') }}">
+                </div>
             </div>
             <div class="card">
-                <h2 class="card-title">Cumulative Class Counts Over Time</h2>
-                <img src="{{ url_for('get_plot', plotname='plot_cumulative_classes') }}">
+                <h2 class="card-title">Cumulative Class Counts</h2>
+                <div class="img-wrapper">
+                    <div class="img-placeholder"><div class="spinner"></div>Generating chart…</div>
+                    <img class="plot-img" data-src="{{ url_for('get_plot', plotname='plot_cumulative_classes') }}">
+                </div>
+            </div>
+            <div class="card">
+                <h2 class="card-title">Occurrence Positions</h2>
+                <div class="img-wrapper">
+                    <div class="img-placeholder"><div class="spinner"></div>Generating chart…</div>
+                    <img class="plot-img" data-src="{{ url_for('get_plot', plotname='plot_occurrence_timeline') }}">
+                </div>
+            </div>
+            <div class="card">
+                <h2 class="card-title">Top Sequential Patterns</h2>
+                <div class="img-wrapper">
+                    <div class="img-placeholder"><div class="spinner"></div>Generating chart…</div>
+                    <img class="plot-img" data-src="{{ url_for('get_plot', plotname='plot_sequential_patterns') }}">
+                </div>
             </div>
         </div>
         <div class="column">
             <div class="card">
                 <h2 class="card-title">Confidence Distribution</h2>
-                <img src="{{ url_for('get_plot', plotname='plot_confidence_distribution') }}">
+                <div class="img-wrapper">
+                    <div class="img-placeholder"><div class="spinner"></div>Generating chart…</div>
+                    <img class="plot-img" data-src="{{ url_for('get_plot', plotname='plot_confidence_distribution') }}">
+                </div>
             </div>
             <div class="card">
                 <h2 class="card-title">Cars Detected per Image</h2>
-                <img src="{{ url_for('get_plot', plotname='plot_detections_per_image') }}">
+                <div class="img-wrapper">
+                    <div class="img-placeholder"><div class="spinner"></div>Generating chart…</div>
+                    <img class="plot-img" data-src="{{ url_for('get_plot', plotname='plot_detections_per_image') }}">
+                </div>
+            </div>
+            <div class="card">
+                <h2 class="card-title">Prediction Timeline</h2>
+                <div class="img-wrapper">
+                    <div class="img-placeholder"><div class="spinner"></div>Generating chart…</div>
+                    <img class="plot-img" data-src="{{ url_for('get_plot', plotname='plot_sequential_timeline') }}">
+                </div>
+            </div>
+            <div class="card">
+                <h2 class="card-title">Average Confidence per Class</h2>
+                <div class="img-wrapper">
+                    <div class="img-placeholder"><div class="spinner"></div>Generating chart…</div>
+                    <img class="plot-img" data-src="{{ url_for('get_plot', plotname='plot_multiple_prediction_timeline') }}">
+                </div>
             </div>
         </div>
     </div>
-
-    <div class="popup-overlay" id="remove-popup">
-        <div class="popup-card">
-            <div class="popup-title">Remove files</div>
-            <div class="popup-body" id="popup-body"></div>
-            <div class="popup-actions" id="popup-actions"></div>
-        </div>
-    </div>
-    <div id="toast"></div>
 
 {% endblock %}
 
@@ -55,5 +107,20 @@
     <!--<script src="{{ url_for('static', filename='JS/files.js') }}"></script>-->
     <script>
         document.getElementById("results-active").classList.add("active");
+
+        document.querySelectorAll(".plot-img").forEach(img => {
+            const placeholder = img.previousElementSibling;
+
+            img.src = img.dataset.src;
+
+            img.addEventListener("load", () => {
+                img.classList.add("loaded");
+                placeholder.classList.add("hidden");
+            });
+
+            img.addEventListener("error", () => {
+                placeholder.innerHTML = `<span class="img-error">Failed to load chart. Did you upload images first?</span>`;
+            });
+        });
     </script>
 {% endblock %}

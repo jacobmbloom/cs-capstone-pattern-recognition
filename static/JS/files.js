@@ -52,7 +52,8 @@ const ServerAdapter = {
     subscribeUpload(file, fileId, { onProgress, onUploaded, onUploadError })
     {
         //  Create hidden form data
-        const fd = new FormData(); fd.append("files", file);
+        const fd = new FormData();
+        fd.append("files", file);
 
         //  Create POST request and subscribe to progress results
         const xhr = new XMLHttpRequest();
@@ -81,7 +82,6 @@ const ServerAdapter = {
         const ws = new WebSocket(url.href);
         ws.onmessage = e => {
             const msg = JSON.parse(e.data);
-            console.log(msg);
 
             if (msg.type === "error")
             {
@@ -91,7 +91,7 @@ const ServerAdapter = {
             else if (msg.type === "done")
             {
                 ws.close();
-                onReady(fileId);
+                onReady(files.find(f => fileId === f.name).id);
             }
             else if (msg.type === "status")
             {
@@ -239,6 +239,69 @@ function _waitThenProcess(f)
 ////////////////////////
 
 /**
+ * Extracts timestamp from filename like:
+ * "2026-04-22 134523 image.png"
+ * @argument {String} name the given file name
+ * @returns {Number} returns epoch time 
+ */
+function parseDateFromFilename(name)
+{
+    const match = name.match(/^(\d{4}-\d{2}-\d{2}) (\d{6})/);
+    if (!match) return null;
+
+    const [_, datePart, timePart] = match;
+
+    const year = datePart.slice(0, 4);
+    const month = datePart.slice(5, 7);
+    const day = datePart.slice(8, 10);
+
+    const hours = timePart.slice(0, 2);
+    const minutes = timePart.slice(2, 4);
+    const seconds = timePart.slice(4, 6);
+
+    // Construct ISO string (local time)
+    const iso = `${year}-${month}-${day}T${hours}:${minutes}:${seconds}`;
+    return new Date(iso).getTime();
+}
+
+/**
+ * Looks at the content of the global "files" list and groups the files together by an appropriet metric
+ * @returns {void}
+ */
+function regroupFilesByDate({ amount = 12, unit = 'hours' } = {}) {
+    const unitToMs = {
+        minutes:           60 * 1000,
+        hours  :      60 * 60 * 1000,
+        days   : 24 * 60 * 60 * 1000
+    };
+
+    const intervalMs = amount * unitToMs[unit];
+    const buckets = {};
+
+    for (const file of files)
+        {
+        const ts = parseDateFromFilename(file.name);
+        if (ts === null) continue; // skip invalid format
+
+        const bucketId = Math.floor(ts / intervalMs);
+        const bucketStart = bucketId * intervalMs;
+
+        if (!buckets[bucketId])
+        {
+            buckets[bucketId] = {
+                start: new Date(bucketStart),
+                end: new Date(bucketStart + intervalMs),
+                files: []
+            };
+        }
+
+        buckets[bucketId].files.push(file);
+    }
+
+    return buckets;
+}
+
+/**
  * Switches the variable data based on sort mode
  * @returns {void}
  */
@@ -317,9 +380,9 @@ function _actionHTML(f)
                 </div>`;
     if (f.status === 'waiting')
         return `<div class="row-actions">
-            <button class="process-btn" onclick="event.stopPropagation();_startProcessing(${f.id})">Process</button>
+            <button class="btn" onclick="event.stopPropagation();processFile(${f.id})">Process</button>
             <button class="remove-btn" onclick="event.stopPropagation();removeFile(${f.id})">Remove</button>
-        </div`;
+        </div>`;
 
     return `<button class="remove-btn" onclick="event.stopPropagation();removeFile(${f.id})">Remove</button>`
 }
@@ -522,6 +585,91 @@ function timeAgo(ts)
 //////////////////////
 //  Page Rendering  //
 //////////////////////
+
+/**
+ * Keeps a parent objects progress consistent with the children
+ * 
+ */
+function parentProgressUpdate(id)
+{
+    //  Get the actual object based on the file id.
+    //      If files doesnt exist, exit early
+    const f = files.find(f => f.id === id);
+    if (!f)
+        return;
+
+    let childCount = f.childIds.length
+    let statuses = Array(STATUS_LABELS.keys().length).fill(0);
+    for (child_id of f.childIds)
+    {
+        const c = files.find(f => f.id === child_id);
+        statuses[STATUS_LABELS.keys().findIndex(s => c.status === s)] += 1;
+    }
+
+    let final_status = "";
+    let progress = 0;
+    for (const [index, entry] of statuses.entries())
+    {
+        //  If all the children have the same state, theres no point in checking others
+        if (entry === childCount)
+        {
+            final_status = STATUS_LABELS.keys()[entry];
+            break;
+        }
+        
+        switch (index)
+        {
+            case 0:
+                final_status = "uploading"
+                progress += entry;
+                break;
+            case 1:
+                if (progress == 0)
+                {
+                    final_status = "waiting"
+                }
+                break;
+            case 2:
+                if (progress == 0)
+                {
+                    final_status = "processing"
+                    progress += entry;
+                }
+                break;
+            case 3:
+                if (progress == 0)
+                {
+                    final_status = "ready"
+                }
+            case 4:
+                final_status = "failed";
+            case 5:
+                final_status = "missing";
+        }
+    }
+
+    //  Let Failed or missing options take priority over everything
+    if (statuses[4] != 0)
+    {
+        return ("failed", 0);
+    }
+    if (statuses[5] != 0)
+    {
+        return ("missing", 0);
+    }
+
+    //  Next see if any are still being uploaded
+    final_status = "uploading";
+    progress = statuses[0];
+
+    //  if it is being uploaded, exit early
+    if (progress != 0)
+    {
+        return (final_status, progress / childCount)
+    }
+
+    progress = statuses[0];
+}
 
 /**
  * A dynamic popup to ask for comfirmation before deleting
@@ -894,21 +1042,7 @@ function processSelected()
 
     targets.forEach(f => {
         f.selected = false;
-
-        //  If the file has something running, call the specific cancel function
-        if (f._cancel)
-        {
-            f._cancel();
-            f._cancel = null;
-        }
-
-        //  Reset the progress variables and clear exisitng errors
-        f.processingProgress = 0;
-        delete f.errorMsg;
-
-        //  Start processing
-        _transitionTo(f, 'processing');
-        _startProcessing(f);
+        processFile(f.id);
     });
     render();
     showToast(`Processing ${targets.length} file${targets.length > 1 ? 's' : ''}…`);
@@ -978,6 +1112,32 @@ function uploadMissing(id)
 }
 
 /**
+ * Function ran when a single file is sent to be processed
+ * @param {Int} id Id of the file from the global "files" list
+ * @param {void}
+ */
+function processFile(id)
+{
+    //  Find the actual file object from global "files" list
+    const f = files.find(f => f.id === id);
+
+    //  If the file has something running, call the specific cancel function
+    if (f._cancel)
+    {
+        f._cancel();
+        f._cancel = null;
+    }
+
+    //  Reset the progress variables and clear exisitng errors
+    f.processingProgress = 0;
+    delete f.errorMsg;
+
+    //  Start processing
+    _transitionTo(f, 'processing');
+    _startProcessing(f);
+}
+
+/**
  * Button handler for the Retry File Download
  * @param {Int} id The local file id 
  * @returns 
@@ -1015,6 +1175,8 @@ function retryFile(id)
 function addFiles(fileList)
 {
     const arr = Array.from(fileList);
+    const validFiles = [];
+    
     arr.forEach(file => {
         //  Check valid type, otherwise exit with error
         const ext = file.name.split('.').pop().toLowerCase();
@@ -1033,10 +1195,88 @@ function addFiles(fileList)
             status: 'uploading', uploadProgress: 0, processingProgress: 0,
             selected: false, _cancel: null, file: file
         };
-        files.unshift(f);
+        validFiles.push(f);
         _startUpload(f); //  TODO: Change to providing an upload button and waiting until user clicks it
     });
     
+    let addedCount = 0;
+    const ungroupable = validFiles.filter(f => parseDateFromFilename(f.name) === null);
+    ungroupable.forEach(f => {
+        newFileIds.add(f.id);
+        files.unshift(f);
+        _startUpload(f);
+        addedCount++;
+    });
+
+    const groupable = validFiles.filter(f => parseDateFromFilename(f.name) !== null);
+    const snapshot = files;
+    files = [...snapshot, ...groupable];
+    const buckets = regroupFilesByDate();
+    files = snapshot;
+
+    Object.values(buckets).forEach(bucket => {
+        //  Only act on files that came from this batch
+        const bucketNewFiles = bucket.files.filter(bf => groupable.find(vf => vf.id === bf.id));
+        if (bucketNewFiles.length === 0) return;
+
+        if (bucketNewFiles.length === 1)
+        {
+            //  Single file in bucket add it directly, no parent needed
+            const f = bucketNewFiles[0];
+            newFileIds.add(f.id);
+            files.unshift(f);
+            _startUpload(f);
+            addedCount++;
+        }
+        else
+        {
+            //  Multiple files share a bucket so create a parent entry to group them
+            const parentId = nextId++;
+            const bucketStart = bucket.start;
+
+            const pad     = n => String(n).padStart(2, '0');
+            const dateStr = `${bucketStart.getFullYear()}-${pad(bucketStart.getMonth() + 1)}-${pad(bucketStart.getDate())}`;
+            const timeStr = `${pad(bucketStart.getHours())}${pad(bucketStart.getMinutes())}${pad(bucketStart.getSeconds())}`;
+            const parentName = `${dateStr} ${timeStr} batch`;
+
+            const totalKb = bucketNewFiles.reduce((sum, f) => {
+                const raw = f.size.includes('MB')
+                    ? parseFloat(f.size) * 1024
+                    : parseFloat(f.size);
+                return sum + raw;
+            }, 0);
+            const parentSize = totalKb < 1024
+                ? `${Math.round(totalKb)} KB`
+                : `${(totalKb / 1024).toFixed(1)} MB`;
+
+            const parent = {
+                id: parentId,
+                name: parentName,
+                size: parentSize,
+                uploadedAt: Date.now(),
+                type: 'csv',
+                status: 'uploading',
+                uploadProgress: 0,
+                processingProgress: 0,
+                selected: false,
+                _cancel: null,
+                childIds: bucketNewFiles.map(f => f.id),
+                expanded: false,
+            };
+
+            bucketNewFiles.forEach(f => {
+                f.parentId = parentId;
+                newFileIds.add(f.id);
+                files.unshift(f);
+                _startUpload(f);
+            });
+
+            newFileIds.add(parentId);
+            files.unshift(parent);
+            addedCount++;
+        }
+    });
+
     //  Update the page to reflect new files
     render();
     newFileIds.forEach(id => {
@@ -1045,7 +1285,9 @@ function addFiles(fileList)
             row.classList.add('row-new');
     });
     newFileIds.clear();
-    showToast(`${arr.length} file${arr.length > 1 ? 's' : ''} added`);
+
+    if (addedCount > 0)
+        showToast(`${addedCount} file${addedCount !== 1 ? 's' : ''} added`);
 }
 
 /**
@@ -1105,6 +1347,58 @@ function removeFile(id)
     showToast('File removed');
 }
 
+/**
+ * Called on page load to make sure the current file list is accurate to the session
+ * TODO: Better comments
+ */
+function pullFromSource()
+{
+    const xhr = new XMLHttpRequest();
+    xhr.open('GET', '/api/getUploads', true);
+    xhr.responseType = 'json';
+
+    xhr.onload = function()
+    {
+        if (xhr.status === 200)
+        {
+            const response = xhr.response;
+
+            if (response && Array.isArray(response.files))
+            {
+                files = response.files.map(fileStr => {
+                    try
+                    {                        
+                        return fileStr;
+                    } catch (e) {
+                        console.error("Invalid JSON string:", fileStr);
+                        return null;
+                    }
+                }).filter(f => f !== null);
+            }
+
+            console.log(files);
+            render();
+        }
+    };
+
+    xhr.send();
+}
+
+/**
+ * Called on page close to make sure the current file list is stored on the server
+ */
+function pushToSource()
+{
+    fetch('/api/saveUploads',{
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(files)
+    })
+    .then(res => res.json())
+    .then(data => console.log(data));
+}
+
+
 // Set up events for drag and drop
 const dropZone  = document.getElementById('drop-zone' );
 const fileInput = document.getElementById('file-input');
@@ -1134,8 +1428,17 @@ document.getElementById('search-input').addEventListener('input', e => {
     render();                       //  Re-render page to filter results based on search
 });
 
+pullFromSource();
+
 //  Initialize the empty file list.
 render();
+
+//  When the user leaves the file page, a message gets sent to the server containing the current state of the 
+//  global files menu
+window.addEventListener('beforeunload', () => {
+    const payload = JSON.stringify(files);
+    navigator.sendBeacon('/api/saveUploads', new Blob([payload], { type: 'application/json' }));
+});
 
 //  Every 15 seconds, update the time since uploaded for each file
 setInterval(() => {

@@ -1,0 +1,88 @@
+{% extends "base.html" %}
+
+{% block title %}Patterns{% endblock %}
+
+{% block styles %}
+    <link rel="stylesheet" href="{{ url_for('static', filename='CSS/patterns.css') }}">
+{% endblock %}
+
+{% block content %}
+<div class="main">
+    <div class="full-card">
+        <div class="shell">
+
+            <div class="content">
+                <div class="c-head">
+                    <div>
+                        <div class="c-title" id="c-title">Select a pattern</div>
+                        <div class="c-sub" id="c-sub">Choose a detected pattern from the panel on the right</div>
+                    </div>
+                    <div class="toolbar">
+                        <button class="tbar-btn active" id="btn-grid">
+                            <svg width="13" height="13" viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="1.5">
+                                <rect x="1" y="1" width="5" height="5" rx="1"/>
+                                <rect x="8" y="1" width="5" height="5" rx="1"/>
+                                <rect x="1" y="8" width="5" height="5" rx="1"/>
+                                <rect x="8" y="8" width="5" height="5" rx="1"/>
+                            </svg>
+                            Grid
+                        </button>
+                        <button class="tbar-btn" id="btn-list">
+                            <svg width="13" height="13" viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="1.5">
+                                <line x1="1" y1="3.5" x2="13" y2="3.5"/>
+                                <line x1="1" y1="7" x2="13" y2="7"/>
+                                <line x1="1" y1="10.5" x2="13" y2="10.5"/>
+                            </svg>
+                            List
+                        </button>
+                    </div>
+                </div>
+
+                <div class="feed" id="feed">
+                    <div class="empty-feed">No pattern selected</div>
+                </div>
+
+            </div>
+
+            <div class="sidebar">
+                <div class="sb-head">
+                    <div class="sb-label">Detected patterns</div>
+                    <div class="sb-search">
+                        <svg width="13" height="13" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5">
+                            <circle cx="6.5" cy="6.5" r="4"/>
+                            <path d="M10.5 10.5L14 14"/>
+                        </svg>
+                        <input type="text" id="pat-search" placeholder="Search patterns…">
+                    </div>
+                </div>
+                <div class="pat-list" id="pat-list">
+                    {% for pattern in patterns %}
+                    <div class="pat-item"
+                         data-id="{{ pattern.id }}"
+                         data-frames='{{ pattern.frames | tojson | e }}'>
+                        <div class="pat-top">
+                            <span class="pat-name">{{ pattern.name }}</span>
+                            <span class="pat-count">{{ pattern.frames | length }}</span>
+                        </div>
+                        <div class="pat-desc">{{ pattern.description }}</div>
+                        <div class="pat-meta">
+                            {% for tag in pattern.tags %}
+                            <span class="pat-tag tag-{{ tag }}">{{ tag }}</span>
+                            {% endfor %}
+                        </div>
+                    </div>
+                    {% endfor %}
+                </div>
+            </div>
+
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+    <script src="{{ url_for('static', filename='JS/pattern.js') }}"></script>
+    <script>
+        document.getElementById("patterns-active").classList.add("active");
+    </script>
+{% endblock %}

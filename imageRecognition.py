@@ -1,4 +1,5 @@
 from ultralytics import YOLO
+import onnxruntime as ort
 import cv2
 import numpy as np
 import tensorflow as tf
@@ -6,31 +7,38 @@ import os
 import pandas as pd
 import matplotlib.pyplot as plt
 from io import StringIO
+import re
+from datetime import datetime
 
 
 DETECTOR = YOLO("yolov8n.pt")
-MODEL = tf.keras.models.load_model("pruned.keras")
+MODEL = ort.InferenceSession("best.onnx", providers=["CPUExecutionProvider"])
+INPUT_NAME = MODEL.get_inputs()[0].name
 
+VALID_YOLO_CLASSES = {"car", "truck", "bus"}
 CLASS_NAMES = [
-        "Convertible",
-        "Coupe",
-        "Hatchback",
-        "Pick-Up",
-        "Sedan",
+        "SEDAN",
+        "SEMI",
         "SUV",
-        "VAN"
+        "TRUCK",
+        "VAN",
         ]
 
 prediction_log = {}
 
+def purgePrediction(fileDirectory):
+    prediction_log.pop(fileDirectory, None)
+
 """
     Extract the bounding box information for the image classification
 """
-def process(img_path: str, final_path: str):
-    class_names = [
-        "Convertible", "Coupe", "Hatchback",
-        "Pick-Up", "Sedan", "SUV", "VAN"
-    ]
+def process(
+        img_path: str,
+        final_path: str,
+        valid_classes = CLASS_NAMES
+    ):
+
+    class_names = CLASS_NAMES
 
     img = cv2.imread(img_path)
     img_rgb = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
@@ -51,7 +59,7 @@ def process(img_path: str, final_path: str):
             cls = int(box.cls[0])
             label = DETECTOR.names[cls]
 
-            if label != "car":
+            if label not in ["car", "truck", "bus"]:
                 continue
 
             x1, y1, x2, y2 = map(int, box.xyxy[0])
@@ -66,6 +74,9 @@ def process(img_path: str, final_path: str):
             confidence = float(np.max(prediction))
 
             predicted_label = class_names[class_id]
+
+            if prediction not in valid_classes:
+                continue
 
             # Scaled box for resized image
             new_x1 = int(x1 * scale_x)
@@ -107,70 +118,122 @@ def process(img_path: str, final_path: str):
         "detections": detections
     }
 
-def image_processing(user_session_id : str, input_path : str, final_path : str):
-
-    # Load YOLO car detector
-    detector = YOLO("yolov8n.pt")
-
-    # Load your Keras classifier
-    model = tf.keras.models.load_model("pruned.keras")
+def image_processing(
+    user_session_id: str,
+    input_path: str,
+    final_path: str,
+    valid_classes=CLASS_NAMES
+):
 
     img = cv2.imread(input_path)
-    img_rgb = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
+    if img is None:
+        raise ValueError(f"Failed to read image: {input_path}")
 
-    # Detect objects
+    h, w, _ = img.shape
+
     results = DETECTOR(img)
+
+    crops = []
+    metadata = []  # store box + filename info for later mapping
 
     for result in results:
         for box in result.boxes:
             cls = int(box.cls[0])
             label = DETECTOR.names[cls]
 
-            if label == "car":
-                x1, y1, x2, y2 = map(int, box.xyxy[0])
+            if label not in VALID_YOLO_CLASSES:
+                continue
 
-                crop = img_rgb[y1:y2, x1:x2]
-                crop = cv2.resize(crop, (244, 244))
-                crop = crop / 255.0
-                crop = np.expand_dims(crop, axis=0)
+            x1, y1, x2, y2 = map(int, box.xyxy[0])
 
-                prediction = model.predict(crop)
-                class_id = np.argmax(prediction)
-                confidence = np.max(prediction)
-                predicted_label = CLASS_NAMES[class_id]
-                print(prediction)
+            # Clamp to image bounds
+            x1, y1 = max(0, x1), max(0, y1)
+            x2, y2 = min(w, x2), min(h, y2)
 
-                if user_session_id not in prediction_log:
-                    prediction_log[user_session_id] = []
+            if x2 <= x1 or y2 <= y1:
+                continue
 
-                # store predictions to data structure
-                prediction_log[user_session_id].append({
-                    "filename": os.path.basename(input_path),
-                    "label": predicted_label,
-                    "confidence": float(confidence),
-                    "x1": x1,
-                    "y1": y1,
-                    "x2": x2,
-                    "y2": y2,
-                })
+            crop = img[y1:y2, x1:x2]
 
-                cv2.rectangle(img_rgb, (x1, y1), (x2, y2), (0,255,0), 3)
-                # Create display text
-                display_text = f"{predicted_label}: {confidence * 100:.1f}%"
+            crop = cv2.resize(crop, (224, 224))
 
-                # Put label above box
-                cv2.putText(
-                    img_rgb,
-                    display_text,
-                    (x1, y1-10),
-                    cv2.FONT_HERSHEY_SIMPLEX,
-                    0.7,
-                    (0, 255, 0),
-                    2,
-                    cv2.LINE_AA
-                )
+            crop = crop.astype(np.float32) / 255.0
 
-    cv2.imwrite(final_path,  cv2.cvtColor(img_rgb, cv2.COLOR_RGB2BGR))
+            # If your model expects CHW instead of HWC, uncomment:
+            # crop = np.transpose(crop, (2, 0, 1))
+
+            crops.append(crop)
+            metadata.append((x1, y1, x2, y2))
+
+    # Nothing detected
+    if not crops:
+        cv2.imwrite(final_path, img)
+        return
+
+    # Batch inference
+    batch = np.stack(crops, axis=0).astype(np.float32)
+
+    predictions = MODEL.run(None, {INPUT_NAME: batch})[0]
+
+    if user_session_id not in prediction_log:
+        prediction_log[user_session_id] = []
+
+    # Process predictions
+    for i, pred in enumerate(predictions):
+        x1, y1, x2, y2 = metadata[i]
+
+        class_id = int(np.argmax(pred))
+        confidence = float(np.max(pred))
+
+        predicted_label = CLASS_NAMES[class_id]
+
+        if predicted_label not in valid_classes:
+            continue
+
+        prediction_log[user_session_id].append({
+            "filename": os.path.basename(input_path),
+            "label": predicted_label,
+            "confidence": confidence,
+            "x1": x1,
+            "y1": y1,
+            "x2": x2,
+            "y2": y2,
+        })
+        print("NEW LABEL")
+
+        # Draw box
+        cv2.rectangle(img, (x1, y1), (x2, y2), (0, 255, 0), 3)
+
+        display_text = f"{predicted_label}: {confidence * 100:.1f}%"
+
+        cv2.putText(
+            img,
+            display_text,
+            (x1, max(0, y1 - 10)),
+            cv2.FONT_HERSHEY_SIMPLEX,
+            0.7,
+            (0, 255, 0),
+            2,
+            cv2.LINE_AA
+        )
+
+    # Save final image
+    cv2.imwrite(final_path, img)
+
+TIMESTAMP_REGEX = re.compile(r"^(\d{4}-\d{2}-\d{2}) (\d{6})")
+
+def extract_timestamp(filename: str) -> datetime:
+    # Strip directory path
+    base = os.path.basename(filename)
+
+    match = TIMESTAMP_REGEX.match(base)
+    if not match:
+        raise ValueError(f"Filename does not match expected format: {filename}")
+
+    date_part = match.group(1)   # YYYY-MM-DD
+    time_part = match.group(2)   # HHmmss
+
+    return datetime.strptime(f"{date_part} {time_part}", "%Y-%m-%d %H%M%S")
 
 def plot_prediction_timeline(fileDirectory : str):
     if fileDirectory not in prediction_log or not prediction_log[fileDirectory]:
@@ -190,6 +253,8 @@ def plot_prediction_timeline(fileDirectory : str):
     ax.scatter(df["index"], df["label_id"])
 
     #ax.set_yticks(list(label_map.values()), list(label_map.keys()))
+    ax.set_yticks(list(label_map.values()))
+    ax.set_yticklabels(list(label_map.keys()))
     ax.set_xlabel("Image Order")
     ax.set_ylabel("Predicted Class")
 
@@ -209,7 +274,8 @@ def plot_prediction_frequency(fileDirectory : str):
 
     ax.set_xlabel('car type')
     ax.set_ylabel('car count')
-    #ax.set_xticks(rotation=20)
+    ax.set_xticks(range(len(car_counts)))
+    ax.set_xticklabels(car_counts.index, rotation=20, ha='right')
 
     return fig
 
@@ -224,7 +290,6 @@ def plot_confidence_distribution(fileDirectory : str):
 
     ax.set_xlabel("Confidence")
     ax.set_ylabel("Frequency")
-    ax.set_title("Confidence Distribution")
 
     return fig
 
@@ -241,8 +306,9 @@ def plot_confidence_per_class(fileDirectory : str):
 
     ax.set_xlabel("Car Type")
     ax.set_ylabel("Avg Confidence")
+    ax.set_xticks(range(len(avg_conf)))
+    ax.set_xticklabels(avg_conf.index, rotation=20, ha='right')
     #ax.set_title("Average Confidence per Class")
-    #ax.set_xticks(rotation=20)
 
     return fig
 
@@ -304,7 +370,6 @@ def plot_multiple_prediction_timeline(fileDirectory : str):
     ax.legend()
 
     return fig
-
 
 ### get patterns from detections ###
 
@@ -370,7 +435,8 @@ def plot_repetition_patterns(fileDirectory : str):
     ax.set_yticklabels(y_labels)
     ax.set_xlabel("Timeline Index")
     ax.set_ylabel("Repeated Car Type")
-    ax.set_title("Repetition Patterns (3+ in a Row)")
+    #ax.set_title("Repetition Patterns (3+ in a Row)")
+    fig.tight_layout()
 
     return fig
 
@@ -385,15 +451,18 @@ def get_occurrence_patterns(fileDirectory : str):
 
     df = pd.DataFrame(prediction_log[fileDirectory])
 
+    df["timestamp"] = df["filename"].apply(extract_timestamp)
+    df = df.sort_values("timestamp")
+
     results = {}
 
     for label in df["label"].unique():
-        indices = df.index[df["label"] == label].tolist()
+        times = df[df["label"] == label]["timestamp"].values
 
-        if len(indices) < 3:
+        if len(times) < 3:
             continue
 
-        gaps = np.diff(indices)
+        gaps = np.diff(times).astype('timedelta64[m]').astype(int)
 
         if len(gaps) == 0:
             continue
@@ -401,12 +470,45 @@ def get_occurrence_patterns(fileDirectory : str):
         avg_gap = round(np.mean(gaps), 2)
 
         results[label] = {
-            "occurrences": len(indices),
+            "occurrences": len(times),
             "average_gap": avg_gap,
-            "indices": indices
+            "indices": times.tolist(),
+            "names": df[df["label"] == label]["filename"].values.tolist()
         }
 
     return results
+
+def get_page_format_occurrence(fileDirectory: str):
+    patterns = get_occurrence_patterns(fileDirectory)
+
+    if patterns is None:
+        return []
+
+    output = []
+
+    for i, (label, data) in enumerate(patterns.items()):
+        frames = []
+
+        for name, item in zip(data["names"], data["indices"]):
+            ts = pd.to_datetime(item).to_pydatetime()
+
+            frames.append({
+                "timestamp": ts.isoformat(),
+                "url": f"/results/{name}"
+            })
+
+        # Sort frames per pattern
+        frames.sort(key=lambda x: x["timestamp"])
+
+        output.append({
+            "id": f"pattern_{i}",
+            "name": label,
+            "description": f"{label} detected {data['occurrences']} times",
+            "tags": ["recurring"],  # you can refine this later
+            "frames": frames
+        })
+
+    return output
 
 def plot_occurrence_patterns(fileDirectory : str):
     patterns = get_occurrence_patterns(fileDirectory)
@@ -428,10 +530,10 @@ def plot_occurrence_patterns(fileDirectory : str):
     ax2.plot(labels, gaps, marker="o")
     ax2.set_ylabel("Average Gap")
 
-    ax1.set_title("Occurrence Patterns")
+    #ax1.set_title("Occurrence Patterns")
+    fig.tight_layout()
 
     return fig
-
 
 def plot_occurrence_timeline(fileDirectory : str):
     patterns = get_occurrence_patterns(fileDirectory)
@@ -452,12 +554,10 @@ def plot_occurrence_timeline(fileDirectory : str):
     ax.set_yticklabels(labels)
     ax.set_xlabel("Timeline Index")
     ax.set_ylabel("Car Type")
-    ax.set_title("Occurrence Positions")
+    #ax.set_title("Occurrence Positions")
     ax.legend()
 
     return fig
-
-
 
 # patterns like the same sequence occuring multiple times in a row
 # ie same sequecne of van suv tuck over and over
@@ -515,7 +615,7 @@ def plot_sequential_patterns(fileDirectory : str):
     ax.set_yticks(range(len(labels)))
     ax.set_yticklabels(labels)
     ax.set_xlabel("Times Repeated")
-    ax.set_title("Top Sequential Patterns")
+    #ax.set_title("Top Sequential Patterns")
 
     return fig
 
@@ -535,6 +635,8 @@ def plot_sequential_timeline(fileDirectory : str):
             [i] * len(p["positions"]),
             s=80
         )
+
+    return fig
 
 def export_predictions(fileDirectory : str):
     output = StringIO()
