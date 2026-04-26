@@ -13,5 +13,8 @@ function closeConfigMenu()
     config_menu.classList.add('hidden');
 }
 
-// Optional: clicking the backdrop closes the menu
-modal_backdrop.addEventListener('click', closeConfigMenu);
+modal_backdrop.addEventListener('click', (e) => {
+  if (e.target === modal_backdrop) {
+    closeConfigMenu();
+  }
+});
