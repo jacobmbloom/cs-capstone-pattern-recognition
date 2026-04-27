@@ -9,11 +9,14 @@ import matplotlib.pyplot as plt
 from io import StringIO
 import re
 from datetime import datetime
-
+from scipy.signal import find_peaks
+from scipy.ndimage import gaussian_filter1d
 
 DETECTOR = YOLO("yolov8n.pt")
 MODEL = ort.InferenceSession("best.onnx", providers=["CPUExecutionProvider"])
 INPUT_NAME = MODEL.get_inputs()[0].name
+
+print(MODEL.get_inputs()[0].shape)
 
 VALID_YOLO_CLASSES = {"car", "truck", "bus"}
 CLASS_NAMES = [
@@ -65,17 +68,17 @@ def process(
             x1, y1, x2, y2 = map(int, box.xyxy[0])
 
             crop = img_rgb[y1:y2, x1:x2]
-            crop = cv2.resize(crop, (244, 244))
-            crop = crop / 255.0
+            crop = cv2.resize(crop, (448, 448))
+            crop = crop.astype(np.float32) / 255.0
             crop = np.expand_dims(crop, axis=0)
 
-            prediction = MODEL.predict(crop, verbose=0)[0]
+            prediction = MODEL.run(None, {INPUT_NAME: crop})[0][0]
             class_id = int(np.argmax(prediction))
             confidence = float(np.max(prediction))
 
             predicted_label = class_names[class_id]
 
-            if prediction not in valid_classes:
+            if predicted_label not in valid_classes:
                 continue
 
             # Scaled box for resized image
@@ -155,12 +158,9 @@ def image_processing(
 
             crop = img[y1:y2, x1:x2]
 
-            crop = cv2.resize(crop, (224, 224))
-
+            crop = cv2.resize(crop, (448, 448))
             crop = crop.astype(np.float32) / 255.0
-
-            # If your model expects CHW instead of HWC, uncomment:
-            # crop = np.transpose(crop, (2, 0, 1))
+            crop = np.transpose(crop, (2, 0, 1))
 
             crops.append(crop)
             metadata.append((x1, y1, x2, y2))
@@ -169,11 +169,14 @@ def image_processing(
     if not crops:
         cv2.imwrite(final_path, img)
         return
+    
+    predictions = []
 
-    # Batch inference
-    batch = np.stack(crops, axis=0).astype(np.float32)
+    for crop in crops:
+        crop = np.expand_dims(crop, axis=0)  # (1,3,448,448)
 
-    predictions = MODEL.run(None, {INPUT_NAME: batch})[0]
+        pred = MODEL.run(None, {INPUT_NAME: crop})[0]
+        predictions.append(pred[0])
 
     if user_session_id not in prediction_log:
         prediction_log[user_session_id] = []
@@ -219,6 +222,12 @@ def image_processing(
 
     # Save final image
     cv2.imwrite(final_path, img)
+
+    return {
+        "image_path": input_path,
+        "output_path": final_path,
+        "num_detections": len(prediction_log.get(user_session_id, []))
+    }
 
 TIMESTAMP_REGEX = re.compile(r"^(\d{4}-\d{2}-\d{2}) (\d{6})")
 
@@ -644,3 +653,231 @@ def export_predictions(fileDirectory : str):
     df.to_csv(output, index=False)
     output.seek(0)
     return output.getvalue()
+
+def build_time_series(label_df: pd.DataFrame, bin_minutes: int = 15):
+    """
+    Converts detections into a binned time series.
+    Returns the series array and the bin edges as timestamps.
+    """
+    origin = label_df["timestamp"].min()
+    end = label_df["timestamp"].max()
+
+    total_minutes = (end - origin).total_seconds() / 60
+    num_bins = int(total_minutes / bin_minutes) + 1
+
+    series = np.zeros(num_bins)
+
+    for _, row in label_df.iterrows():
+        minutes = (row["timestamp"] - origin).total_seconds() / 60
+        bin_idx = int(minutes / bin_minutes)
+        series[bin_idx] += 1
+
+    return series, origin, bin_minutes
+
+def find_recurrence_periods(series, bin_minutes: int, min_period_minutes: int = 30):
+
+    # Normalize
+    s = series - series.mean()
+
+    # Full autocorrelation
+    autocorr = np.correlate(s, s, mode="full")
+    autocorr = autocorr[len(autocorr) // 2:]  # keep positive lags only
+    autocorr /= autocorr[0]                   # normalize to 1.0 at lag 0
+
+    # Smooth to reduce noise
+    autocorr_smooth = gaussian_filter1d(autocorr, sigma=2)
+
+    # Find peaks — each peak is a candidate period
+    min_lag = max(1, min_period_minutes // bin_minutes)
+    peaks, props = find_peaks(autocorr_smooth, height=0.1, distance=min_lag)
+
+    periods = []
+    for peak in peaks:
+        period_minutes = peak * bin_minutes
+        strength = float(autocorr_smooth[peak])
+        periods.append({
+            "period_minutes": period_minutes,
+            "period_label": format_period(period_minutes),
+            "strength": round(strength, 3),  # 0.0-1.0, higher = stronger pattern
+        })
+
+    # Sort by strength descending
+    periods.sort(key=lambda x: -x["strength"])
+    return periods, autocorr_smooth
+
+def format_period(minutes: int) -> str:
+    """Human readable period label."""
+    if minutes < 60:
+        return f"{minutes}min"
+    elif minutes < 1440:
+        hours = round(minutes / 60, 1)
+        return f"{hours}hr"
+    elif minutes < 10080:
+        days = round(minutes / 1440, 1)
+        return f"{days}d"
+    else:
+        weeks = round(minutes / 10080, 1)
+        return f"{weeks}wk"
+
+def get_occurrences_for_period(label_df: pd.DataFrame, period_minutes: int, window_minutes: int = -1):
+    if window_minutes < 0:
+        window_minutes = max(15, int(period_minutes * 0.10))
+
+    label_df = label_df.sort_values("timestamp").reset_index(drop=True)
+    timestamps = label_df["timestamp"].values
+    abs_minutes = label_df["abs_minutes"].values
+
+    visited = np.zeros(len(label_df), dtype=bool)
+    groups = []
+
+    for i in range(len(label_df)):
+        if visited[i]:
+            continue
+
+        group_indices = [i]
+        visited[i] = True
+
+        # Walk forward and find detections that are at N * period away
+        # (N=1,2,3... — allows missed cycles)
+        last_anchor = abs_minutes[i]
+
+        for j in range(i + 1, len(label_df)):
+            if visited[j]:
+                continue
+
+            gap = abs_minutes[j] - abs_minutes[i]
+
+            # Is this gap a multiple of the period (within tolerance)?
+            nearest_multiple = round(gap / period_minutes)
+            if nearest_multiple == 0:
+                continue
+
+            expected = nearest_multiple * period_minutes
+            deviation = abs(gap - expected)
+
+            if deviation <= window_minutes:
+                group_indices.append(j)
+                visited[j] = True
+
+        if len(group_indices) >= 2:
+            group_df = label_df.iloc[group_indices]
+            groups.append({
+                "timestamps": group_df["timestamp"].tolist(),
+                "filenames": group_df["filename"].tolist(),
+                "count": len(group_indices),
+            })
+
+    return groups
+
+
+def get_time_patterns(fileDirectory: str, bin_minutes: int = 15, min_occurrences: int = 2):
+    if fileDirectory not in prediction_log or not prediction_log[fileDirectory]:
+        return None
+
+    df = pd.DataFrame(prediction_log[fileDirectory])
+    df["timestamp"] = df["filename"].apply(extract_timestamp)
+    df = df.sort_values("timestamp")
+
+    origin = df["timestamp"].min()
+    df["abs_minutes"] = (df["timestamp"] - origin).dt.total_seconds() / 60
+
+    results = {}
+
+    for label in df["label"].unique():
+        label_df = df[df["label"] == label].copy()
+
+        if len(label_df) < min_occurrences:
+            continue
+
+        series, origin_ts, bin_min = build_time_series(label_df, bin_minutes)
+        periods, autocorr = find_recurrence_periods(series, bin_min)
+
+        if not periods:
+            continue
+
+        label_patterns = []
+
+        for period in periods:
+            groups = get_occurrences_for_period(label_df, period["period_minutes"])
+
+            if not groups:
+                continue
+
+            # Predict next occurrence for each group
+            for group in groups:
+                last_seen = max(group["timestamps"])
+                next_occurrence = last_seen + pd.Timedelta(minutes=period["period_minutes"])
+
+                group["predicted_next"] = next_occurrence.isoformat()
+                group["last_seen"] = last_seen.isoformat()
+
+            label_patterns.append({
+                "period": period["period_label"],
+                "period_minutes": period["period_minutes"],
+                "strength": period["strength"],
+                "groups": groups,
+            })
+
+        results[label] = {
+            "patterns": label_patterns,
+            "autocorr": autocorr.tolist(),
+        }
+
+    return results
+
+def get_page_format_patterns(fileDirectory: str, bin_minutes: int = 15, min_occurrences: int = 2):
+    """
+    Converts get_time_patterns() output into the format expected by patterns.html.
+    Each detected period per vehicle becomes its own pattern card in the sidebar.
+    """
+    raw = get_time_patterns(fileDirectory, bin_minutes=bin_minutes, min_occurrences=min_occurrences)
+
+    if not raw:
+        return []
+
+    output = []
+    pattern_index = 0
+
+    for label, data in raw.items():
+        for period_data in data["patterns"]:
+            period_label = period_data["period"]
+            strength = period_data["strength"]
+            total_occurrences = sum(g["count"] for g in period_data["groups"])
+
+            # Flatten all frames across groups, sorted by timestamp
+            frames = []
+            for group in period_data["groups"]:
+                for ts, fname in zip(group["timestamps"], group["filenames"]):
+                    frames.append({
+                        "timestamp": pd.Timestamp(ts).isoformat(),
+                        "url": f"/results/{fname}"
+                    })
+
+            frames.sort(key=lambda x: x["timestamp"])
+
+            if not frames:
+                continue
+
+            # Confidence label for tags
+            if strength >= 0.6:
+                confidence_tag = "high"
+            elif strength >= 0.3:
+                confidence_tag = "medium"
+            else:
+                confidence_tag = "low"
+
+            output.append({
+                "id": f"pattern_{pattern_index}",
+                "name": f"{label} — every {period_label}",
+                "description": f"{label} detected {total_occurrences} times on a {period_label} cycle",
+                "tags": ["recurring", confidence_tag],
+                "frames": frames,
+                # Extra data available in JS via data-frames if you want to use it later
+                "predicted_next": period_data["groups"][-1].get("predicted_next"),
+            })
+
+            pattern_index += 1
+
+    # Sort strongest patterns first
+    output.sort(key=lambda x: x["frames"].__len__(), reverse=True)
+    return output

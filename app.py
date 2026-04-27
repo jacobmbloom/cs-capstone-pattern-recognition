@@ -157,7 +157,7 @@ def visualizations():
 def patterns():
     if "fileDirectory" not in session:
         redirect("/files")
-    raw_patterns = get_page_format_occurrence(session["fileDirectory"])
+    raw_patterns = get_page_format_patterns(session["fileDirectory"])
 
     return render_template("patterns.html", patterns=raw_patterns)  
 
@@ -196,7 +196,8 @@ def get_plot(plotname: str):
     #       BUT to keep it safe it must be a function from the table above
     fig = PLOT_FUNCTION_MAP[plotname](session["fileDirectory"])
     
-    print(type(fig))
+    if not fig:
+        raise Exception("Figure Error")
 
     if (isinstance(fig, tuple)):
         fig = fig[0]
@@ -274,7 +275,7 @@ def api_upload():
     #name = request.get_json()
     file = request.files.get("files")
 
-    if not file.filename:
+    if not file or not file.filename:
         return {"status": "error", "message": "General File error"}
 
     if not any([file.filename.endswith(fileType) for fileType in VALID_TYPES]):

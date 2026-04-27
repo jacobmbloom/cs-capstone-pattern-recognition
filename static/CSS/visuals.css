@@ -17,9 +17,10 @@
 .img-error {
     color: #ef4444;
 }
+
 .img-wrapper {
-    flex: 1;        /* Fills remaining card space after the title */
-    min-height: 0;  /* Critical: same fix for nested flex */
+    flex: 1;
+    min-height: 0;
     position: relative;
     overflow: hidden;
 }
@@ -33,7 +34,7 @@
     justify-content: center;
     gap: 12px;
     background: #ffffff;
-    color:  #9ca3af;
+    color: #9ca3af;
     font-size: 0.85rem;
 }
 
@@ -58,4 +59,50 @@
     display: flex;
     flex-direction: column;
     max-width: 33%;
+}
+
+@media screen and (max-width: 768px) {
+
+    .main {
+        flex-direction: column;
+        overflow-y: auto;
+        overflow-x: hidden;
+        height: auto;
+        min-height: 0;
+        align-items: stretch;
+    }
+
+    .full-card {
+        overflow-y: auto;
+        height: auto;
+    }
+
+    .column {
+        flex: none;
+        max-width: 100%;
+        width: 100%;
+    }
+
+    .card {
+        min-height: 280px;
+        border-radius: 14px;
+        margin: 8px 12px;
+    }
+
+    .card-title {
+        font-size: 13.5px;
+        font-weight: 600;
+        padding: 10px 14px 0;
+        text-align: left;
+    }
+
+    .img-placeholder {
+        font-size: 0.78rem;
+        gap: 8px;
+    }
+
+    .spinner {
+        width: 24px;
+        height: 24px;
+    }
 }
