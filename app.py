@@ -1,4 +1,3 @@
-
 from flask import Flask, Response, render_template, request, session, redirect, send_from_directory, jsonify
 from flask_sock import Sock
 from io import BytesIO
@@ -37,7 +36,7 @@ lastSeenLock = threading.Lock()
 # Utility #
 ###########
 
-def checkDependancies(path: str):
+def checkdependencies(path: str):
     if not os.path.exists(path):
         return "File not found"
 
@@ -46,51 +45,85 @@ def checkDependancies(path: str):
     if "filename" not in df.columns:
         return "File does not contain media references"
 
+    print(list(df["filename"].unique()))
     return list(df["filename"].unique())
 
+def _find_csv_for_file(file_directory: str, filename: str):
+    """
+    Search fileManager entries for file_directory to find a CSV whose
+    'dependencies' list includes the given filename.
+
+    Returns the absolute path to that CSV upload, or None if no match found.
+    fileManager entries look like:
+        {"name": "data.csv", "dependencies": ["img1.png", "img2.jpg"], ...}
+    """
+    entries = fileManager.get(file_directory, [])
+    for entry in entries:
+        deps = entry.get("dependencies") or entry.get("dependencies") or []
+        if filename in deps:
+            csv_name = entry.get("name", "")
+            if csv_name.endswith(".csv"):
+                return os.path.join(UPLOAD_DIR, file_directory, csv_name)
+    return None
+
+
 def runImageProcessing(files, ws, file_directory):
-    
+
+    # Build active class filter from settings (None = allow all)
     valid = None
     if file_directory in settingManager:
-        valid = []
-        for setting, state in settingManager[file_directory].items():
-            if state == "on":
-                valid.append(setting)
-    
+        active = [s for s, state in settingManager[file_directory].items() if state == "on"]
+        if active:
+            valid = active
+
     for i, file in enumerate(files):
         try:
-            if valid:
+            filename    = os.path.basename(file)
+            input_path  = os.path.join(UPLOAD_DIR, file_directory, filename)
+            output_path = os.path.join(RESULT_DIR,  file_directory, filename)
+
+            # Check whether this image is covered by an already-uploaded CSV
+            csv_path = _find_csv_for_file(file_directory, filename)
+
+            if csv_path and os.path.exists(csv_path):
+                # replay detections from CSV
+                result = csv_processing(
+                    file_directory,
+                    csv_path,
+                    input_path,
+                    output_path,
+                    valid or CLASS_NAMES,
+                )
+            elif valid:
                 result = image_processing(
                     file_directory,
-                    os.path.join(UPLOAD_DIR, file_directory, os.path.basename(file)),
-                    os.path.join(RESULT_DIR, file_directory, os.path.basename(file)),
-                    valid
+                    input_path,
+                    output_path,
+                    valid,
                 )
             else:
                 result = image_processing(
                     file_directory,
-                    os.path.join(UPLOAD_DIR, file_directory, os.path.basename(file)),
-                    os.path.join(RESULT_DIR, file_directory, os.path.basename(file))
+                    input_path,
+                    output_path,
                 )
 
             ws.send(json.dumps({
-                "type": "status",
-                "file": os.path.basename(file),
+                "type":     "status",
+                "file":     filename,
                 "progress": int((i + 1) / len(files) * 100),
-                "result": result
+                "result":   result,
             }))
             print("Clean")
 
         except Exception as e:
             ws.send(json.dumps({
-                "type": "error",
-                "file": os.path.basename(file),
-                "message": str(e)
+                "type":    "error",
+                "file":    os.path.basename(file),
+                "message": str(e),
             }))
 
-    ws.send(json.dumps({
-        "type": "done"
-    }))
+    ws.send(json.dumps({"type": "done"}))
 
 ################
 # User Cleanup #
@@ -218,14 +251,6 @@ def get_file(filename):
         filename
     )
 
-@app.route("/csvDownload")
-def download_csv():
-    return Response(
-        export_predictions(session["fileDirectory"]),
-        mimetype="text/csv",
-        headers={"Content-Disposition": "attachment;filename=data.csv"}
-    )
-
 ##############
 # API Routes #
 ##############
@@ -235,30 +260,44 @@ def api_getUploads():
     if "fileDirectory" not in session:
         return { "files" : [] }
 
-    print(fileManager[session["fileDirectory"]])
+    print(len(fileManager[session["fileDirectory"]]))
     return { "files": fileManager[session["fileDirectory"]] }
 
 @app.route("/api/saveUploads", methods=["POST"])
 def api_saveUploads():
     data = request.get_json() 
     
+    print(data)
+
     if not isinstance(data, list):
         return jsonify({"error": "Expected a list of objects"}), 400
 
-    if session["fileDirectory"] not in fileManager:
-        fileManager[session["fileDirectory"]] = []
+    directory = session["fileDirectory"]
+
+    if directory not in fileManager:
+        fileManager[directory] = []
+
+    # Create a lookup dict for existing items by name
+    existing_map = {item["name"]: idx for idx, item in enumerate(fileManager[directory])}
+
     for item in data:
-        match = -1
-        for i, existing in enumerate(fileManager[session["fileDirectory"]]):
-            if existing["name"] == item["name"]:
-                match = i
-        if match != -1:
-            fileManager[session["fileDirectory"]][i] = item
+        name = item.get("name")
+        if not name:
+            continue  # skip invalid items
+
+        if name in existing_map:
+            # Update existing item
+            index = existing_map[name]
+            fileManager[directory][index] = item
         else:
-            fileManager[session["fileDirectory"]].append(item) 
+            # Add new item
+            fileManager[directory].append(item)
+            existing_map[name] = len(fileManager[directory]) - 1
 
-
-    return jsonify({"message": "Successfully received list", "count": len(data)}), 200
+    return jsonify({
+        "message": "Successfully received list",
+        "count": len(data)
+    }), 200
 
 @app.route("/api/upload", methods=["POST"])
 def api_upload():
@@ -286,9 +325,52 @@ def api_upload():
 
     results = {"status": "good"}
     if file.filename.endswith(".csv"):
-        results["dependancies"] = checkDependancies(path)
+        results["dependencies"] = checkdependencies(path)
 
     return results
+
+@app.route("/api/remove", methods=["POST"])
+def api_remove():
+    if "fileDirectory" not in session:
+        return redirect("/")
+
+    data = request.get_json()
+    names = data.get("files", []) if isinstance(data, dict) else []
+
+    if not names:
+        return jsonify({"error": "No file names provided"}), 400
+
+    directory = session["fileDirectory"]
+    removed = []
+    not_found = []
+
+    for name in names:
+        # Remove upload file
+        upload_path = os.path.join(UPLOAD_DIR, directory, name)
+        if os.path.exists(upload_path):
+            os.remove(upload_path)
+            removed.append(name)
+        else:
+            not_found.append(name)
+
+        # Remove result file (image with detections drawn on it)
+        result_path = os.path.join(RESULT_DIR, directory, name)
+        if os.path.exists(result_path):
+            os.remove(result_path)
+
+    # Remove entries from fileManager
+    if directory in fileManager:
+        fileManager[directory] = [f for f in fileManager[directory] if f.get("name") not in removed]
+
+    # Remove detections from prediction log
+    if removed:
+        removePredictions(directory, removed)
+
+    return jsonify({
+        "message": "Removal complete",
+        "removed": removed,
+        "not_found": not_found
+    }), 200
 
 @app.route("/settingChange", methods=["POST"])
 def settingsChange():
@@ -297,10 +379,19 @@ def settingsChange():
 
     data = dict(request.form)
 
+    print(data)
+
     settingManager[session["fileDirectory"]] = data
 
     return redirect("/files")
 
+@app.route("/api/export")
+def download_csv():
+    return Response(
+        export_predictions(session["fileDirectory"]),
+        mimetype="text/csv",
+        headers={"Content-Disposition": "attachment;filename=data.csv"}
+    )
 
 #################
 # Socket Events #
@@ -313,6 +404,7 @@ def socket_process(ws, fileId):
     file_directory = session.get("fileDirectory")
     
     if not file_directory:
+        print("FAILED SOCKET: fileId")
         ws.send(json.dumps({"type": "error", "message": "Session expired or invalid"}))
         return
     

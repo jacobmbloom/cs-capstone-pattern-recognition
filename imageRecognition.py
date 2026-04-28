@@ -27,19 +27,50 @@ CLASS_NAMES = [
         "VAN",
         ]
 
+GRAPH_FIGSIZE = (9, 5)
+GRAPH_DPI     = 200
+
+CLASS_COLORS = {
+    "SEDAN": "#4C72B0",
+    "SEMI":  "#DD8452",
+    "SUV":   "#55A868",
+    "TRUCK": "#C44E52",
+    "VAN":   "#8172B2",
+}
+
+def _class_color(label: str) -> str:
+    """Return the canonical colour for a class label."""
+    return CLASS_COLORS.get(label, "#999999")
+
+def _apply_graph_defaults(fig, ax_list=None):
+    """Apply tight_layout with consistent padding so nothing is clipped."""
+    fig.tight_layout(pad=1.5)
+    return fig
+
 prediction_log = {}
 
 def purgePrediction(fileDirectory):
     prediction_log.pop(fileDirectory, None)
 
-"""
-    Extract the bounding box information for the image classification
-"""
+def removePredictions(fileDirectory, filenames):
+    """Remove prediction log entries for a specific set of filenames."""
+    if fileDirectory not in prediction_log:
+        return
+    filename_set = set(filenames)
+    prediction_log[fileDirectory] = [
+        entry for entry in prediction_log[fileDirectory]
+        if entry["filename"] not in filename_set
+    ]
+    print(prediction_log)
+
 def process(
         img_path: str,
         final_path: str,
         valid_classes = CLASS_NAMES
     ):
+    """
+    Extract the bounding box information for the image classification
+    """
 
     class_names = CLASS_NAMES
 
@@ -137,7 +168,7 @@ def image_processing(
     results = DETECTOR(img)
 
     crops = []
-    metadata = []  # store box + filename info for later mapping
+    metadata = []  # store box and filename info for later mapping
 
     for result in results:
         for box in result.boxes:
@@ -180,6 +211,14 @@ def image_processing(
 
     if user_session_id not in prediction_log:
         prediction_log[user_session_id] = []
+
+    filename = os.path.basename(input_path)
+
+    # Remove existing entries for this file
+    prediction_log[user_session_id] = [
+        entry for entry in prediction_log[user_session_id]
+        if entry["filename"] != filename
+    ]
 
     # Process predictions
     for i, pred in enumerate(predictions):
@@ -229,6 +268,82 @@ def image_processing(
         "num_detections": len(prediction_log.get(user_session_id, []))
     }
 
+def csv_processing(
+    user_session_id: str,
+    csv_path: str,
+    input_path: str,
+    final_path: str,
+    valid_classes=CLASS_NAMES
+):
+    filename = os.path.basename(input_path)
+
+    # Load CSV
+    df = pd.read_csv(csv_path)
+    required_cols = {"filename", "label", "confidence", "x1", "y1", "x2", "y2"}
+    if not required_cols.issubset(df.columns):
+        raise ValueError(
+            f"CSV is missing required columns. "
+            f"Expected: {required_cols}, got: {set(df.columns)}"
+        )
+
+    # Keep only rows that belong to this image
+    image_rows = df[df["filename"] == filename].copy()
+
+    # Apply class filter
+    #   respects settings passed in as valid_classes
+    image_rows = image_rows[image_rows["label"].isin(valid_classes)]
+
+    # Read source image for annotation
+    img = cv2.imread(input_path)
+    if img is None:
+        raise ValueError(f"Failed to read image: {input_path}")
+
+    # Update prediction_log
+    if user_session_id not in prediction_log:
+        prediction_log[user_session_id] = []
+
+    # Remove any stale entries for this file first
+    prediction_log[user_session_id] = [
+        entry for entry in prediction_log[user_session_id]
+        if entry["filename"] != filename
+    ]
+
+    for _, row in image_rows.iterrows():
+        x1, y1, x2, y2 = int(row["x1"]), int(row["y1"]), int(row["x2"]), int(row["y2"])
+        label      = str(row["label"])
+        confidence = float(row["confidence"])
+
+        prediction_log[user_session_id].append({
+            "filename":   filename,
+            "label":      label,
+            "confidence": confidence,
+            "x1": x1, "y1": y1,
+            "x2": x2, "y2": y2,
+        })
+
+        # Draw bounding box + label onto image
+        cv2.rectangle(img, (x1, y1), (x2, y2), (0, 255, 0), 3)
+        cv2.putText(
+            img,
+            f"{label}: {confidence * 100:.1f}%",
+            (x1, max(0, y1 - 10)),
+            cv2.FONT_HERSHEY_SIMPLEX,
+            0.7,
+            (0, 255, 0),
+            2,
+            cv2.LINE_AA,
+        )
+
+    cv2.imwrite(final_path, img)
+
+    return {
+        "image_path":    input_path,
+        "output_path":   final_path,
+        "num_detections": len(image_rows),
+        "source": "csv",
+    }
+
+
 TIMESTAMP_REGEX = re.compile(r"^(\d{4}-\d{2}-\d{2}) (\d{6})")
 
 def extract_timestamp(filename: str) -> datetime:
@@ -257,16 +372,17 @@ def plot_prediction_timeline(fileDirectory : str):
     label_map = {label: i for i, label in enumerate(df["label"].unique())}
     df["label_id"] = df["label"].map(label_map)
 
-    fig, ax = plt.subplots()
-    
-    ax.scatter(df["index"], df["label_id"])
+    fig, ax = plt.subplots(figsize=GRAPH_FIGSIZE, dpi=GRAPH_DPI)
 
-    #ax.set_yticks(list(label_map.values()), list(label_map.keys()))
+    colors = [_class_color(lbl) for lbl in df["label"]]
+    ax.scatter(df["index"], df["label_id"], c=colors, zorder=3)
+
     ax.set_yticks(list(label_map.values()))
     ax.set_yticklabels(list(label_map.keys()))
     ax.set_xlabel("Image Order")
     ax.set_ylabel("Predicted Class")
 
+    _apply_graph_defaults(fig)
     return fig
 
 def plot_prediction_frequency(fileDirectory : str):
@@ -277,15 +393,17 @@ def plot_prediction_frequency(fileDirectory : str):
 
     car_counts = df['label'].value_counts()
 
-    fig, ax = plt.subplots()
+    fig, ax = plt.subplots(figsize=GRAPH_FIGSIZE, dpi=GRAPH_DPI)
 
-    ax.bar(car_counts.index, car_counts.values)
+    bar_colors = [_class_color(lbl) for lbl in car_counts.index]
+    ax.bar(car_counts.index, car_counts.values, color=bar_colors)
 
-    ax.set_xlabel('car type')
-    ax.set_ylabel('car count')
+    ax.set_xlabel('Car Type')
+    ax.set_ylabel('Car Count')
     ax.set_xticks(range(len(car_counts)))
     ax.set_xticklabels(car_counts.index, rotation=20, ha='right')
 
+    _apply_graph_defaults(fig)
     return fig
 
 def plot_confidence_distribution(fileDirectory : str):
@@ -294,12 +412,13 @@ def plot_confidence_distribution(fileDirectory : str):
 
     df = pd.DataFrame(prediction_log[fileDirectory])
 
-    fig, ax = plt.subplots()
-    ax.hist(df["confidence"], bins=20)
+    fig, ax = plt.subplots(figsize=GRAPH_FIGSIZE, dpi=GRAPH_DPI)
+    ax.hist(df["confidence"], bins=20, color="#4C72B0")
 
     ax.set_xlabel("Confidence")
     ax.set_ylabel("Frequency")
 
+    _apply_graph_defaults(fig)
     return fig
 
 def plot_confidence_per_class(fileDirectory : str):
@@ -310,15 +429,17 @@ def plot_confidence_per_class(fileDirectory : str):
 
     avg_conf = df.groupby("label")["confidence"].mean()
 
-    fig, ax = plt.subplots()
-    ax.bar(avg_conf.index, avg_conf.values)
+    fig, ax = plt.subplots(figsize=GRAPH_FIGSIZE, dpi=GRAPH_DPI)
+
+    bar_colors = [_class_color(lbl) for lbl in avg_conf.index]
+    ax.bar(avg_conf.index, avg_conf.values, color=bar_colors)
 
     ax.set_xlabel("Car Type")
     ax.set_ylabel("Avg Confidence")
     ax.set_xticks(range(len(avg_conf)))
     ax.set_xticklabels(avg_conf.index, rotation=20, ha='right')
-    #ax.set_title("Average Confidence per Class")
 
+    _apply_graph_defaults(fig)
     return fig
 
 def plot_cumulative_classes(fileDirectory: str):
@@ -329,18 +450,18 @@ def plot_cumulative_classes(fileDirectory: str):
     df["index"] = range(len(df))
 
     # Create figure and axis (subplot)
-    fig, ax = plt.subplots()
+    fig, ax = plt.subplots(figsize=GRAPH_FIGSIZE, dpi=GRAPH_DPI)
 
     for label in df["label"].unique():
         mask = (df["label"] == label).astype(int)
         cumulative = mask.cumsum()
-
-        ax.plot(df["index"], cumulative, label=label)
+        ax.plot(df["index"], cumulative, label=label, color=_class_color(label))
 
     ax.set_xlabel("Image Index")
     ax.set_ylabel("Cumulative Count")
     ax.legend()
 
+    _apply_graph_defaults(fig)
     return fig, ax
 
 def plot_detections_per_image(fileDirectory : str):
@@ -351,12 +472,13 @@ def plot_detections_per_image(fileDirectory : str):
 
     counts = df.groupby("filename").size()
 
-    fig, ax = plt.subplots()
-    plt.hist(counts, bins=10)
+    fig, ax = plt.subplots(figsize=GRAPH_FIGSIZE, dpi=GRAPH_DPI)
+    ax.hist(counts, bins=10, color="#4C72B0")
 
     ax.set_xlabel("Detections per Image")
     ax.set_ylabel("Frequency")
 
+    _apply_graph_defaults(fig)
     return fig
 
 # plot all predictions found per image
@@ -369,15 +491,17 @@ def plot_multiple_prediction_timeline(fileDirectory : str):
     # count each label per image
     counts = df.groupby(["filename", "label"]).size().unstack(fill_value=0)
 
-    fig, ax = plt.subplots()
+    fig, ax = plt.subplots(figsize=GRAPH_FIGSIZE, dpi=GRAPH_DPI)
 
     for label in counts.columns:
-        ax.plot(range(len(counts.index)), counts[label], marker="o", label=label)
+        ax.plot(range(len(counts.index)), counts[label], marker="o",
+                label=label, color=_class_color(label))
 
     ax.set_xlabel("Image Order")
     ax.set_ylabel("Detections")
     ax.legend()
 
+    _apply_graph_defaults(fig)
     return fig
 
 ### get patterns from detections ###
@@ -430,13 +554,13 @@ def plot_repetition_patterns(fileDirectory : str):
     if not patterns:
         return None
 
-    fig, ax = plt.subplots()
+    fig, ax = plt.subplots(figsize=GRAPH_FIGSIZE, dpi=GRAPH_DPI)
 
     y_labels = []
     y_pos = []
 
     for i, p in enumerate(patterns):
-        ax.barh(i, p["count"], left=p["start_index"])
+        ax.barh(i, p["count"], left=p["start_index"], color=_class_color(p["label"]))
         y_labels.append(p["label"])
         y_pos.append(i)
 
@@ -444,9 +568,8 @@ def plot_repetition_patterns(fileDirectory : str):
     ax.set_yticklabels(y_labels)
     ax.set_xlabel("Timeline Index")
     ax.set_ylabel("Repeated Car Type")
-    #ax.set_title("Repetition Patterns (3+ in a Row)")
-    fig.tight_layout()
 
+    _apply_graph_defaults(fig)
     return fig
 
 
@@ -513,7 +636,7 @@ def get_page_format_occurrence(fileDirectory: str):
             "id": f"pattern_{i}",
             "name": label,
             "description": f"{label} detected {data['occurrences']} times",
-            "tags": ["recurring"],  # you can refine this later
+            "tags": ["recurring"],
             "frames": frames
         })
 
@@ -529,19 +652,18 @@ def plot_occurrence_patterns(fileDirectory : str):
     counts = [patterns[x]["occurrences"] for x in labels]
     gaps = [patterns[x]["average_gap"] for x in labels]
 
-    fig, ax1 = plt.subplots()
+    fig, ax1 = plt.subplots(figsize=GRAPH_FIGSIZE, dpi=GRAPH_DPI)
 
-    ax1.bar(labels, counts)
+    bar_colors = [_class_color(lbl) for lbl in labels]
+    ax1.bar(labels, counts, color=bar_colors)
     ax1.set_ylabel("Occurrences")
     ax1.set_xlabel("Car Type")
 
     ax2 = ax1.twinx()
-    ax2.plot(labels, gaps, marker="o")
-    ax2.set_ylabel("Average Gap")
+    ax2.plot(labels, gaps, marker="o", color="#333333")
+    ax2.set_ylabel("Average Gap (min)")
 
-    #ax1.set_title("Occurrence Patterns")
-    fig.tight_layout()
-
+    _apply_graph_defaults(fig)
     return fig
 
 def plot_occurrence_timeline(fileDirectory : str):
@@ -550,22 +672,22 @@ def plot_occurrence_timeline(fileDirectory : str):
     if not patterns:
         return None
 
-    fig, ax = plt.subplots()
+    fig, ax = plt.subplots(figsize=GRAPH_FIGSIZE, dpi=GRAPH_DPI)
 
     labels = list(patterns.keys())
 
     for i, label in enumerate(labels):
         x = patterns[label]["indices"]
         y = [i] * len(x)
-        ax.scatter(x, y, s=80, label=label)
+        ax.scatter(x, y, s=80, label=label, color=_class_color(label), zorder=3)
 
     ax.set_yticks(range(len(labels)))
     ax.set_yticklabels(labels)
     ax.set_xlabel("Timeline Index")
     ax.set_ylabel("Car Type")
-    #ax.set_title("Occurrence Positions")
     ax.legend()
 
+    _apply_graph_defaults(fig)
     return fig
 
 # patterns like the same sequence occuring multiple times in a row
@@ -617,15 +739,15 @@ def plot_sequential_patterns(fileDirectory : str):
     labels = [" -> ".join(p["sequence"]) for p in patterns]
     counts = [p["count"] for p in patterns]
 
-    fig, ax = plt.subplots(figsize=(10,6))
+    fig, ax = plt.subplots(figsize=GRAPH_FIGSIZE, dpi=GRAPH_DPI)
 
-    ax.barh(range(len(labels)), counts)
+    ax.barh(range(len(labels)), counts, color="#4C72B0")
 
     ax.set_yticks(range(len(labels)))
     ax.set_yticklabels(labels)
     ax.set_xlabel("Times Repeated")
-    #ax.set_title("Top Sequential Patterns")
 
+    _apply_graph_defaults(fig)
     return fig
 
 def plot_sequential_timeline(fileDirectory : str):
@@ -636,15 +758,18 @@ def plot_sequential_timeline(fileDirectory : str):
 
     patterns = sorted(patterns, key=lambda x: x["count"], reverse=True)[:8]
 
-    fig, ax = plt.subplots(figsize=(10,6))
+    fig, ax = plt.subplots(figsize=GRAPH_FIGSIZE, dpi=GRAPH_DPI)
 
     for i, p in enumerate(patterns):
         ax.scatter(
             p["positions"],
             [i] * len(p["positions"]),
-            s=80
+            s=80,
+            color="#4C72B0",
+            zorder=3,
         )
 
+    _apply_graph_defaults(fig)
     return fig
 
 def export_predictions(fileDirectory : str):
@@ -682,12 +807,13 @@ def find_recurrence_periods(series, bin_minutes: int, min_period_minutes: int = 
     # Full autocorrelation
     autocorr = np.correlate(s, s, mode="full")
     autocorr = autocorr[len(autocorr) // 2:]  # keep positive lags only
-    autocorr /= autocorr[0]                   # normalize to 1.0 at lag 0
+    autocorr /= autocorr[0]                   # normalize
 
     # Smooth to reduce noise
     autocorr_smooth = gaussian_filter1d(autocorr, sigma=2)
 
-    # Find peaks — each peak is a candidate period
+    # Find peaks
+    #   each peak is a candidate period
     min_lag = max(1, min_period_minutes // bin_minutes)
     peaks, props = find_peaks(autocorr_smooth, height=0.1, distance=min_lag)
 
@@ -698,7 +824,7 @@ def find_recurrence_periods(series, bin_minutes: int, min_period_minutes: int = 
         periods.append({
             "period_minutes": period_minutes,
             "period_label": format_period(period_minutes),
-            "strength": round(strength, 3),  # 0.0-1.0, higher = stronger pattern
+            "strength": round(strength, 3),  # 0.0-1.0, higher is stronger pattern
         })
 
     # Sort by strength descending
@@ -738,7 +864,6 @@ def get_occurrences_for_period(label_df: pd.DataFrame, period_minutes: int, wind
         visited[i] = True
 
         # Walk forward and find detections that are at N * period away
-        # (N=1,2,3... — allows missed cycles)
         last_anchor = abs_minutes[i]
 
         for j in range(i + 1, len(label_df)):
@@ -747,7 +872,7 @@ def get_occurrences_for_period(label_df: pd.DataFrame, period_minutes: int, wind
 
             gap = abs_minutes[j] - abs_minutes[i]
 
-            # Is this gap a multiple of the period (within tolerance)?
+            # Is this gap a multiple of the period?
             nearest_multiple = round(gap / period_minutes)
             if nearest_multiple == 0:
                 continue
@@ -844,7 +969,7 @@ def get_page_format_patterns(fileDirectory: str, bin_minutes: int = 15, min_occu
             strength = period_data["strength"]
             total_occurrences = sum(g["count"] for g in period_data["groups"])
 
-            # Flatten all frames across groups, sorted by timestamp
+            # Flatten all frames across groups sorted by timestamp
             frames = []
             for group in period_data["groups"]:
                 for ts, fname in zip(group["timestamps"], group["filenames"]):
@@ -872,7 +997,6 @@ def get_page_format_patterns(fileDirectory: str, bin_minutes: int = 15, min_occu
                 "description": f"{label} detected {total_occurrences} times on a {period_label} cycle",
                 "tags": ["recurring", confidence_tag],
                 "frames": frames,
-                # Extra data available in JS via data-frames if you want to use it later
                 "predicted_next": period_data["groups"][-1].get("predicted_next"),
             })
 

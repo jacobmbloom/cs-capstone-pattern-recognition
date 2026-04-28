@@ -377,22 +377,6 @@
     gap: 6px;
 }
 
-.remove-btn {
-    background: none;
-    border: 1px solid transparent;
-    color: var(--muted);
-    font-size: 12px;
-    font-weight: 500;
-    font-family: 'DM Sans', sans-serif;
-    padding: 4px 10px;
-    border-radius: 6px;
-    cursor: pointer;
-    white-space: nowrap;
-    transition: background 0.12s, border-color 0.12s, color 0.12s;
-}
-
-.remove-btn:hover { background: var(--red-light); border-color: var(--red); color: var(--red); }
-
 .retry-btn,
 .upload-missing-btn {
     background: none;
@@ -462,56 +446,6 @@
 }
 
 .empty-state p { font-size: 13.5px; }
-
-.popup-overlay {
-    display: none;
-    position: fixed;
-    inset: 0;
-    background: rgba(0,0,0,0.4);
-    z-index: 200;
-    align-items: center;
-    justify-content: center;
-}
-
-.popup-overlay.visible { display: flex; }
-
-.popup-card {
-    background: var(--card);
-    border-radius: 12px;
-    padding: 24px;
-    width: 420px;
-    max-width: calc(100vw - 40px);
-    box-shadow: 0 8px 40px rgba(0,0,0,0.18);
-    display: flex;
-    flex-direction: column;
-    gap: 14px;
-}
-
-.popup-title { font-size: 15px; font-weight: 600; color: var(--text); }
-.popup-body  { font-size: 13px; color: var(--muted); line-height: 1.6; }
-
-.popup-actions {
-    display: flex;
-    gap: 8px;
-    justify-content: flex-end;
-    flex-wrap: wrap;
-}
-
-.popup-btn {
-    font-size: 12.5px;
-    font-weight: 500;
-    font-family: 'DM Sans', sans-serif;
-    padding: 6px 14px;
-    border-radius: 7px;
-    cursor: pointer;
-    border: 1px solid var(--border);
-    transition: background 0.12s, border-color 0.12s;
-}
-
-.popup-btn.secondary       { background: none; color: var(--text); }
-.popup-btn.secondary:hover { background: var(--bg); }
-.popup-btn.danger          { background: var(--red); color: #fff; border-color: var(--red); }
-.popup-btn.danger:hover    { background: #dc2626; }
 
 .modal-child-list {
     margin-top: 10px;

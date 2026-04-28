@@ -59,7 +59,14 @@ const ServerAdapter = {
         const xhr = new XMLHttpRequest();
         xhr.open("POST", "/api/upload");
         xhr.upload.onprogress = e => onProgress(fileId, Math.round(e.loaded/e.total*100));
-        xhr.onload  = e => onUploaded(fileId, e.dependancies);
+        xhr.onload  = () => {
+            try {
+                const res = JSON.parse(xhr.responseText);
+                onUploaded(fileId, res.dependencies ?? null);
+            } catch {
+                onUploaded(fileId, null);
+            }
+        };
         xhr.onerror = () => onUploadError(fileId, "Network error");       
         xhr.send(fd);
     },
@@ -72,31 +79,50 @@ const ServerAdapter = {
      * @param {Function} onProcessingError - The function called when something goes wrong
      * @returns 
      */
-    subscribeProcessing(fileId, { onProgress, onReady, onProcessingError } )
+    subscribeProcessing(fileName, { onProgress, onReady, onProcessingError } )
     {
-        console.log(fileId);
+        console.log(fileName);
         // Create an absolute URL based on the current location and relative path
-        const url = new URL(`./process/${fileId}`, window.location.href);
+        const url = new URL(`./process/${fileName}`, window.location.href);
         url.protocol = url.protocol.replace(/^http/, 'ws');
 
         const ws = new WebSocket(url.href);
+        let settled = false;    //  Guard to prevent onerror/onclose firing after a clean finish
+        let done = false;       //  Tracks whether a "done" message was received before close
+
         ws.onmessage = e => {
             const msg = JSON.parse(e.data);
 
             if (msg.type === "error")
             {
+                settled = true;
                 ws.close();
-                onProcessingError(fileId, msg.message);
+                onProcessingError(fileName, msg.message);
             }
             else if (msg.type === "done")
             {
-                ws.close();
-                onReady(files.find(f => fileId === f.name).id);
+                done = true;    //  Mark done
             }
             else if (msg.type === "status")
             {
-                onProgress(fileId, msg.progress);
+                onProgress(fileName, msg.progress);
             }
+        };
+
+        ws.onerror = () => {
+            if (settled) return;
+            if (done) return;
+            settled = true;
+            onProcessingError(fileName, 'Connection error');
+        };
+
+        ws.onclose = e => {
+            if (settled) return;
+            settled = true;
+            if (done)
+                onReady(fileName);
+            else
+                onProcessingError(fileName, e.reason || 'Connection closed unexpectedly');
         };
 
     return () => ws.close();
@@ -115,24 +141,43 @@ function onChildrenResolved(parentId, childDefs)
     if (!parent)
         return;
 
-    //  For each child, create the new full file object
-    const newChildren = childDefs.map(def => ({
-        ...def,
-        uploadedAt: Date.now(),
-        uploadProgress: def.status === 'missing' ? 0 : 100,
-        processingProgress: 0,
-        selected: false,
-        _cancel: null,
-        parentId,
-    }));
+    //  Standardize entries
+    const normalizedDefs = childDefs.map(def =>
+        typeof def === 'string' ? { name: def, status: 'missing' } : def
+    );
 
-    //  If the files dont already exist, add them to the end of the files list
-    newChildren.forEach(c => {
-        if (!files.find(f => f.id === c.id))
-            files.push(c);
+    const childIds = [];
+
+    normalizedDefs.forEach(def => {
+        //  Check if a file with this name already exists
+        const existing = files.find(f => f.name === def.name);
+        if (existing)
+        {
+            //  Claim the existing entry as a child of this parent
+            existing.parentId = parentId;
+            childIds.push(existing.id);
+        }
+        else
+        {
+            //  No match
+            //      create a placeholder
+            const child = {
+                id: nextId++,
+                ...def,
+                uploadedAt: Date.now(),
+                uploadProgress: def.status === 'missing' ? 0 : 100,
+                processingProgress: 0,
+                selected: false,
+                _cancel: null,
+                parentId,
+            };
+            files.push(child);
+            childIds.push(child.id);
+        }
     });
-    //  Set child ids list of parent to match the new files
-    parent.childIds = newChildren.map(c => c.id);
+
+    //  Set child ids list of parent to match the resolved children
+    parent.childIds = childIds;
     //  If children are missing, open the expanded mode for parent
     parent.expanded = hasMissingChild(parent);
     //  Re-render file list to update based on new files
@@ -152,17 +197,26 @@ function _startUpload(f)
             file.uploadProgress = pct;                                    // Set file's progress based on send result
             _patchBar(id, pct);                                           // Update the progress bar
         },
-        onUploaded(id, dependancies) {
+        onUploaded(id, dependencies) {
             const file = files.find(x => x.id === id); if (!file) return; // Get the actual file object based on id
             file.uploadProgress = 100;                                    // Set progress to 100%
 
-            //  If the file has dependancies, mark them here
-            if (dependancies == true)
-            {
-                file.dependancies
-            }
+            //  If the server returned child dependencies, resolve them onto this file as parent
+            if (Array.isArray(dependencies) && dependencies.length > 0)
+                onChildrenResolved(id, dependencies);
 
-            _transitionTo(file, 'waiting'); // Change file state 
+            _transitionTo(file, 'waiting'); // Change file state
+
+            //  If this was a missing child, collapse the parent once all missing are resolved
+            if (file.parentId)
+            {
+                const parent = files.find(p => p.id === file.parentId);
+                if (parent && !hasMissingChild(parent))
+                {
+                    parent.expanded = false;
+                    render();
+                }
+            }
         },
         onUploadError(id, msg) {
             const file = files.find(x => x.id === id); if (!file) return; // Get the actual file object based on id
@@ -189,117 +243,35 @@ function _startProcessing(f)
 
     //  Set up the server processing object as the current processing to be canceled by others
     f._cancel = ServerAdapter.subscribeProcessing(f.name, {
-        onProgress(id, pct)
+        onProgress(name, pct)
         {
-            const file = files.find(x => x.id === id);if (!file) return; // Get the actual file object based on id
-            file.processingProgress = pct;                               // Set file's progress based on send result
-            _patchBar(id, pct);                                          // Update progress bar
+            const file = files.find(x => x.name === name); if (!file) return; // Get the actual file object based on name
+            file.processingProgress = pct;                                     // Set file's progress based on send result
+            _patchBar(file.id, pct);                                           // Update progress bar
+            if (file.parentId) parentProgressUpdate(file.parentId);           // Mirror progress to parent CSV
         },
-        onReady(id)
+        onReady(name)
         {
-            const file = files.find(x => x.id === id); if (!file) return; // Get the actual file object based on id
-            file.processingProgress = 100;                                // Set the progress to 100%
-            file._cancel = null;                                          // Remove cancel call from file
-            _transitionTo(file, 'ready');                                 // Change file state
+            const file = files.find(x => x.name === name); if (!file) return; // Get the actual file object based on name
+            file.processingProgress = 100;                                     // Set the progress to 100%
+            file._cancel = null;                                               // Remove cancel call from file
+            _transitionTo(file, 'ready');                                      // Change file state
+            if (file.parentId) parentProgressUpdate(file.parentId);           // Mirror completion to parent CSV
         },
-        onProcessingError(id, msg)
+        onProcessingError(name, msg)
         {
-            const file = files.find(x => x.id === id); if (!file) return; // Get the actual file object based on id
-            file.errorMsg = msg || 'Processing failed';                   // Set the error message
-            file._cancel = null;                                          // Remove cancel call from file
-            _transitionTo(file, 'failed');                                // Change file state
+            const file = files.find(x => x.name === name); if (!file) return; // Get the actual file object based on name
+            file.errorMsg = msg || 'Processing failed';                        // Set the error message
+            file._cancel = null;                                               // Remove cancel call from file
+            _transitionTo(file, 'failed');                                     // Change file state
+            if (file.parentId) parentProgressUpdate(file.parentId);           // Mirror failure to parent CSV
         },
     });
 }
 
-/*
-//  Defunct simulation function
-//  TODO: replace with actual logic to wait until the user manually starts processing
-function _waitThenProcess(f)
-{
-    // Simulate waiting for a processing slot (~1-2 s).
-    // In production: server will push a "slot_available" event instead.
-    const delay = 1000 + Math.random() * 1000;
-    const t = setTimeout(() => {
-        if (f.status !== 'waiting')
-            return; // cancelled / removed
-
-        _transitionTo(f, 'processing');
-        _startProcessing(f);
-
-        // If this is a child, don't double-relay; parent relay handles siblings
-        if (!f.parentId)
-            _relayProcessingToChildren(f.id);
-    }, delay);
-    f._cancel = () => clearTimeout(t);
-}*/
-
 ////////////////////////
 //  Helper Functions  //
 ////////////////////////
-
-/**
- * Extracts timestamp from filename like:
- * "2026-04-22 134523 image.png"
- * @argument {String} name the given file name
- * @returns {Number} returns epoch time 
- */
-function parseDateFromFilename(name)
-{
-    const match = name.match(/^(\d{4}-\d{2}-\d{2}) (\d{6})/);
-    if (!match) return null;
-
-    const [_, datePart, timePart] = match;
-
-    const year = datePart.slice(0, 4);
-    const month = datePart.slice(5, 7);
-    const day = datePart.slice(8, 10);
-
-    const hours = timePart.slice(0, 2);
-    const minutes = timePart.slice(2, 4);
-    const seconds = timePart.slice(4, 6);
-
-    // Construct ISO string (local time)
-    const iso = `${year}-${month}-${day}T${hours}:${minutes}:${seconds}`;
-    return new Date(iso).getTime();
-}
-
-/**
- * Looks at the content of the global "files" list and groups the files together by an appropriet metric
- * @returns {void}
- */
-function regroupFilesByDate({ amount = 12, unit = 'hours' } = {}) {
-    const unitToMs = {
-        minutes:           60 * 1000,
-        hours  :      60 * 60 * 1000,
-        days   : 24 * 60 * 60 * 1000
-    };
-
-    const intervalMs = amount * unitToMs[unit];
-    const buckets = {};
-
-    for (const file of files)
-        {
-        const ts = parseDateFromFilename(file.name);
-        if (ts === null) continue; // skip invalid format
-
-        const bucketId = Math.floor(ts / intervalMs);
-        const bucketStart = bucketId * intervalMs;
-
-        if (!buckets[bucketId])
-        {
-            buckets[bucketId] = {
-                start: new Date(bucketStart),
-                end: new Date(bucketStart + intervalMs),
-                files: []
-            };
-        }
-
-        buckets[bucketId].files.push(file);
-    }
-
-    return buckets;
-}
 
 /**
  * Switches the variable data based on sort mode
@@ -310,7 +282,6 @@ function toggleSort()
     const btn = document.getElementById('sort-btn');
     const label = btn.childNodes[0];
 
-    //  TODO: Change so that sorting methods arent hard coded
     if (sortMode === 'recent')
     {
         sortMode = 'az';
@@ -361,7 +332,36 @@ function _removeId(id)
 function _removeIds(ids)
 {
     ids.forEach(id => _removeId(id));
-    setTimeout(() => { files = files.filter(f => !ids.includes(f.id)); render(); }, 220);
+    setTimeout(() => {
+        const names = ids
+            .map(id => files.find(f => f.id === id)?.name)
+            .filter(Boolean);
+
+        //  Remove from global list
+        files = files.filter(f => !ids.includes(f.id));
+
+        //  Notify server of removed files, then save updated list
+        _removeFromServer(names).finally(() => pushToSource());
+
+        render();
+    }, 220);
+}
+
+/**
+ * POSTs a list of file names to /api/remove to delete them on the server
+ * @param {String[]} names Array of file names to remove
+ * @returns {Promise}
+ */
+function _removeFromServer(names)
+{
+    return fetch('/api/remove', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ files: names })
+    })
+    .then(res => res.json())
+    .then(data => console.log('Removed from server:', data))
+    .catch(err => console.error('Failed to remove from server:', err));
 }
 
 /**
@@ -587,134 +587,38 @@ function timeAgo(ts)
 //////////////////////
 
 /**
- * Keeps a parent objects progress consistent with the children
- * 
+ * Mirrors child processing progress onto the parent's progress bar.
+ * Shows the average processingProgress across all children, and transitions
+ * the parent to 'ready' once every child is done.
+ * @param {Int} parentId The id of the parent file from global "files"
  */
-function parentProgressUpdate(id)
+function parentProgressUpdate(parentId)
 {
-    //  Get the actual object based on the file id.
-    //      If files doesnt exist, exit early
-    const f = files.find(f => f.id === id);
-    if (!f)
+    const parent = files.find(f => f.id === parentId);
+    if (!parent || !parent.childIds || parent.childIds.length === 0)
         return;
 
-    let childCount = f.childIds.length
-    let statuses = Array(STATUS_LABELS.keys().length).fill(0);
-    for (child_id of f.childIds)
+    const children = parent.childIds.map(cid => files.find(f => f.id === cid)).filter(Boolean);
+
+    //  Compute average processing progress across all children
+    const avg = Math.round(children.reduce((sum, c) => sum + (c.processingProgress ?? 0), 0) / children.length);
+
+    //  Ensure the parent is in 'processing' state with a visible bar
+    if (parent.status !== 'processing')
+        _transitionTo(parent, 'processing');
+
+    //  Push the averaged progress to the parent's bar
+    parent.processingProgress = avg;
+    _patchBar(parent.id, avg);
+
+    //  If every child has finished (ready or failed), resolve the parent too
+    const allDone = children.every(c => c.status === 'ready' || c.status === 'failed');
+    if (allDone)
     {
-        const c = files.find(f => f.id === child_id);
-        statuses[STATUS_LABELS.keys().findIndex(s => c.status === s)] += 1;
+        const anyFailed = children.some(c => c.status === 'failed');
+        parent._cancel = null;
+        _transitionTo(parent, anyFailed ? 'failed' : 'ready');
     }
-
-    let final_status = "";
-    let progress = 0;
-    for (const [index, entry] of statuses.entries())
-    {
-        //  If all the children have the same state, theres no point in checking others
-        if (entry === childCount)
-        {
-            final_status = STATUS_LABELS.keys()[entry];
-            break;
-        }
-        
-        switch (index)
-        {
-            case 0:
-                final_status = "uploading"
-                progress += entry;
-                break;
-            case 1:
-                if (progress == 0)
-                {
-                    final_status = "waiting"
-                }
-                break;
-            case 2:
-                if (progress == 0)
-                {
-                    final_status = "processing"
-                    progress += entry;
-                }
-                break;
-            case 3:
-                if (progress == 0)
-                {
-                    final_status = "ready"
-                }
-            case 4:
-                final_status = "failed";
-            case 5:
-                final_status = "missing";
-        }
-    }
-
-    //  Let Failed or missing options take priority over everything
-    if (statuses[4] != 0)
-    {
-        return ("failed", 0);
-    }
-    if (statuses[5] != 0)
-    {
-        return ("missing", 0);
-    }
-
-    //  Next see if any are still being uploaded
-    final_status = "uploading";
-    progress = statuses[0];
-
-    //  if it is being uploaded, exit early
-    if (progress != 0)
-    {
-        return (final_status, progress / childCount)
-    }
-
-    progress = statuses[0];
-}
-
-/**
- * A dynamic popup to ask for comfirmation before deleting
- * @param {String} title The title to give the current popup 
- * @param {String} bodyHTML Additional content to be show. Must be valid html
- * @param {Object} actions A list of objects the user can pick from. Must be form of { label: 'Cancel', cls: 'secondary', fn: closeModal }
- */
-function showRemovePopup(title, bodyHTML, actions)
-{
-    //  The pop up already exists on the page but is hidden until it is needed
-    //      Set the internal content before enabling
-    document.querySelector('.popup-title').textContent = title;
-    document.getElementById('popup-body').innerHTML = bodyHTML;
-
-    //  Get the popup objects
-    const overlay = document.getElementById('remove-popup');
-    const actionsEl = document.getElementById('popup-actions');
-
-    //  Remove leftover actions, then fill in with the passed actions
-    actionsEl.innerHTML = '';
-    actions.forEach(({ label, cls, fn }) => {
-        const btn = document.createElement('button');
-        btn.className = `popup-btn ${cls}`;
-        btn.textContent = label;
-        btn.onclick = fn;
-        actionsEl.appendChild(btn);
-    });
-
-    //  Make the popup visible
-    overlay.classList.add('visible');
-    
-    //  Close on backdrop click
-    overlay.onclick = e => {
-        if (e.target === overlay)
-            closePopup();
-    };
-}
-
-/**
- * Helper function to close popup from anywhere
- * @returns {void}
- */
-function closePopup()
-{
-    document.getElementById('remove-popup').classList.remove('visible');
 }
 
 /**
@@ -754,8 +658,9 @@ function _rowHTML(f, isChild = false)
         (isChild && f.status === 'missing') ? 'missing-file' : '',
     ].filter(Boolean).join(' ');    //  Remove empty strings from class list
 
-    //  Account for multiple ways to store jpeg's
-    const iconLabel = f.type === 'jpeg' ? 'JPG' : f.type.toUpperCase();
+    //  Account for multiple ways to store jpeg
+    const resolvedType = f.type ?? f.name.split('.').pop();
+    const iconLabel = resolvedType === 'jpeg' ? 'JPG' : resolvedType.toUpperCase();
 
     //  Add the dropdown button if file is a parent
     const childCount = isParent ? f.childIds.length : 0;
@@ -942,7 +847,7 @@ function render()
         tbody.innerHTML = `
         <div class="empty-state">
             <svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
-            <p>${searchQuery ? 'No files match your search.' : 'No files yet — drop some above!'}</p>
+            <p>${searchQuery ? 'No files match your search.' : 'No files yet - drop some above!'}</p>
         </div>`;
         return;
     }
@@ -1087,8 +992,10 @@ function uploadMissing(id)
 
         //  Fill in the missing placeholder information, based on new file object
         const kb = file.size / 1024;
+        f.file = file;  //  Attach the actual File blob so _startUpload can send it
         f.name = file.name;
         f.size = kb < 1024 ? `${Math.round(kb)} KB` : `${(kb / 1024).toFixed(1)} MB`;
+        f.type = file.name.split('.').pop().toLowerCase();
         f.uploadedAt = Date.now();
         f.uploadProgress = 0;
         f.processingProgress = 0;
@@ -1096,14 +1003,6 @@ function uploadMissing(id)
         //  Start upload to server
         _transitionTo(f, 'uploading');
         _startUpload(f);
-        
-        // Check if parent should now collapse (no more missing children)
-        const parent = f.parentId ? files.find(p => p.id === f.parentId) : null;
-        if (parent && !hasMissingChild(parent))
-        {
-            parent.expanded = false;
-            render();   //  refresh renderer
-        }
         showToast(`Uploading ${file.name}…`);
     };
 
@@ -1112,7 +1011,8 @@ function uploadMissing(id)
 }
 
 /**
- * Function ran when a single file is sent to be processed
+ * Function ran when a single file is sent to be processed.
+ * If the file is a CSV parent, processes all its children instead.
  * @param {Int} id Id of the file from the global "files" list
  * @param {void}
  */
@@ -1120,6 +1020,29 @@ function processFile(id)
 {
     //  Find the actual file object from global "files" list
     const f = files.find(f => f.id === id);
+
+    //  If the file is a CSV parent, relay processing down to each child instead
+    if (f.childIds && f.childIds.length > 0)
+    {
+        f.childIds.forEach(cid => {
+            const child = files.find(x => x.id === cid);
+            if (!child || child.status === 'missing')
+                return;  // skip children that haven't been uploaded yet
+
+            if (child._cancel)
+            {
+                child._cancel();
+                child._cancel = null;
+            }
+
+            child.processingProgress = 0;
+            delete child.errorMsg;
+
+            _transitionTo(child, 'processing');
+            _startProcessing(child);
+        });
+        return;
+    }
 
     //  If the file has something running, call the specific cancel function
     if (f._cancel)
@@ -1176,12 +1099,22 @@ function addFiles(fileList)
 {
     const arr = Array.from(fileList);
     const validFiles = [];
-    
+    const invalidNames = [];
+
+    const TIMESTAMP_REGEX = /^(\d{4}-\d{2}-\d{2}) (\d{6})/;
+
     arr.forEach(file => {
-        //  Check valid type, otherwise exit with error
+        //  Check valid type
         const ext = file.name.split('.').pop().toLowerCase();
         const type = ['mp4', 'mov', 'jpg', 'jpeg', 'png', 'webm', 'gif', 'csv'].includes(ext) ? ext : null;
-        if (type == null) return;   //  TODO: Add proper error message
+        if (type == null) return;
+
+        //  Check valid filename format matches YYYY-MM-DD HHmmss
+        if (type !== 'csv' && !TIMESTAMP_REGEX.test(file.name))
+        {
+            invalidNames.push(file.name);
+            return;
+        }
 
         //  Calculate filesize for display
         const kb = file.size / 1024;
@@ -1196,85 +1129,31 @@ function addFiles(fileList)
             selected: false, _cancel: null, file: file
         };
         validFiles.push(f);
-        _startUpload(f); //  TODO: Change to providing an upload button and waiting until user clicks it
-    });
-    
-    let addedCount = 0;
-    const ungroupable = validFiles.filter(f => parseDateFromFilename(f.name) === null);
-    ungroupable.forEach(f => {
-        newFileIds.add(f.id);
-        files.unshift(f);
         _startUpload(f);
-        addedCount++;
     });
 
-    const groupable = validFiles.filter(f => parseDateFromFilename(f.name) !== null);
-    const snapshot = files;
-    files = [...snapshot, ...groupable];
-    const buckets = regroupFilesByDate();
-    files = snapshot;
-
-    Object.values(buckets).forEach(bucket => {
-        //  Only act on files that came from this batch
-        const bucketNewFiles = bucket.files.filter(bf => groupable.find(vf => vf.id === bf.id));
-        if (bucketNewFiles.length === 0) return;
-
-        if (bucketNewFiles.length === 1)
+    let addedCount = 0;
+    validFiles.forEach(f => {
+        //  Check if this file fills a missing placeholder anywhere in the list
+        const missing = files.find(x => x.status === 'missing' && x.name === f.name);
+        if (missing)
         {
-            //  Single file in bucket add it directly, no parent needed
-            const f = bucketNewFiles[0];
-            newFileIds.add(f.id);
-            files.unshift(f);
-            _startUpload(f);
-            addedCount++;
+            //  Update the placeholder in-place rather than adding a duplicate
+            missing.file = f.file;
+            missing.size = f.size;
+            missing.type = f.type;
+            missing.uploadedAt = f.uploadedAt;
+            missing.uploadProgress = 0;
+            missing.processingProgress = 0;
+            _transitionTo(missing, 'uploading');
+            _startUpload(missing);
         }
         else
         {
-            //  Multiple files share a bucket so create a parent entry to group them
-            const parentId = nextId++;
-            const bucketStart = bucket.start;
-
-            const pad     = n => String(n).padStart(2, '0');
-            const dateStr = `${bucketStart.getFullYear()}-${pad(bucketStart.getMonth() + 1)}-${pad(bucketStart.getDate())}`;
-            const timeStr = `${pad(bucketStart.getHours())}${pad(bucketStart.getMinutes())}${pad(bucketStart.getSeconds())}`;
-            const parentName = `${dateStr} ${timeStr} batch`;
-
-            const totalKb = bucketNewFiles.reduce((sum, f) => {
-                const raw = f.size.includes('MB')
-                    ? parseFloat(f.size) * 1024
-                    : parseFloat(f.size);
-                return sum + raw;
-            }, 0);
-            const parentSize = totalKb < 1024
-                ? `${Math.round(totalKb)} KB`
-                : `${(totalKb / 1024).toFixed(1)} MB`;
-
-            const parent = {
-                id: parentId,
-                name: parentName,
-                size: parentSize,
-                uploadedAt: Date.now(),
-                type: 'csv',
-                status: 'uploading',
-                uploadProgress: 0,
-                processingProgress: 0,
-                selected: false,
-                _cancel: null,
-                childIds: bucketNewFiles.map(f => f.id),
-                expanded: false,
-            };
-
-            bucketNewFiles.forEach(f => {
-                f.parentId = parentId;
-                newFileIds.add(f.id);
-                files.unshift(f);
-                _startUpload(f);
-            });
-
-            newFileIds.add(parentId);
-            files.unshift(parent);
-            addedCount++;
+            newFileIds.add(f.id);
+            files.unshift(f);
         }
+        addedCount++;
     });
 
     //  Update the page to reflect new files
@@ -1288,8 +1167,24 @@ function addFiles(fileList)
 
     if (addedCount > 0)
         showToast(`${addedCount} file${addedCount !== 1 ? 's' : ''} added`);
-}
 
+    //  Show popup listing any files that failed the name format check
+    if (invalidNames.length > 0)
+        showPopup(
+            'Invalid filenames',
+            `The following file${invalidNames.length !== 1 ? 's' : ''} were skipped because their names don't match the expected format <strong>YYYY-MM-DD HHmmss</strong>:`
+                + '<ul class="modal-child-list">'
+                + invalidNames.map(name => {
+                    const ext = name.split('.').pop().toLowerCase();
+                    const lbl = ext === 'jpeg' ? 'JPG' : ext.toUpperCase();
+                    return `<li><span class="file-icon ${ext}">${lbl}</span>${name}</li>`;
+                }).join('')
+                + '</ul>',
+            [
+                { label: 'OK', cls: 'secondary', fn: closePopup },
+            ]
+        );
+}
 /**
  * Ran on button click,
  *  Removes a file from the global array based on the id
@@ -1314,25 +1209,26 @@ function removeFile(id)
     //      Lets user cancel, Remove only the parent, or remove all.
     if (uploadedChildren.length > 0)
     {
-        showRemovePopup(
+        showPopup(
             'Remove files',
             `Also remove the <strong>${uploadedChildren.length} child file${uploadedChildren.length !== 1 ? 's' : ''}</strong> associated with <strong>${f.name}</strong>?`
                 + '<ul class="modal-child-list">'
                 + uploadedChildren.map(c => {
-                    const lbl = c.type === 'jpeg' ? 'JPG' : c.type.toUpperCase();
+                    const resolvedType = c.type ?? c.name.split('.').pop();
+                    const lbl = resolvedType === 'jpeg' ? 'JPG' : resolvedType.toUpperCase();
                     return `<li><span class="file-icon ${c.type}">${lbl}</span>${c.name}</li>`;
                 }).join('')
                 + '</ul>',
             [
-                { label: 'Cancel', cls: 'secondary', fn: closeModal },
+                { label: 'Cancel', cls: 'secondary', fn: closePopup },
                 { label: 'Remove parent only', cls: 'secondary', fn: () => {
-                    closeModal();                                       //  Close popup
+                    closePopup();                                       //  Close popup
                     uploadedChildren.forEach(c => delete c.parentId);   //  Unlink the children from parent
                     _removeIds([id]);                                 //  Remove parent
                     showToast('File removed');
                 }},
                 { label: 'Remove all', cls: 'danger', fn: () => {
-                    closeModal();                                               //  Close the popup
+                    closePopup();                                               //  Close the popup
                     _removeIds([id, ...uploadedChildren.map(c => c.id)]);     //  Remove all files including children
                     showToast(`${1 + uploadedChildren.length} files removed`);
                 } },
@@ -1340,7 +1236,6 @@ function removeFile(id)
         );
         return;
     }
-    //  Else
 
     //  Remove the file
     _removeIds([id]);

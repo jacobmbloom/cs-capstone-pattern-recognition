@@ -186,7 +186,7 @@ const drawer = (function () {
         });
     });
 
-    // Swipe-up to close (sheet slides back up)
+    // Swipe-up to close
     let startY = 0;
     sidebar.addEventListener('touchstart', e => { startY = e.touches[0].clientY; }, { passive: true });
     sidebar.addEventListener('touchend', e => {
@@ -204,12 +204,12 @@ const drawer = (function () {
         const el = document.querySelector(`.pat-item[data-id="${savedId}"]`);
         if (el) {
             selectPatternEl(el);
-            // Mark the drawer button as having a selection (mobile)
+            // Mark the drawer button as having a selection
             const drawerBtn = document.getElementById('btn-patterns');
             if (drawerBtn) drawerBtn.classList.add('has-selection');
             return;
         }
-        // Saved ID no longer exists (patterns changed) — clear stale session
+        // Saved ID no longer exists
         clearSession();
     }
 

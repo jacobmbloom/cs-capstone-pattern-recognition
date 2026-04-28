@@ -13,95 +13,6 @@
 </head>
 
 <body>
-    <div class="modal-backdrop hidden">
-        <div class="config-menu">
-            <div class="card">
-                <h2 class="card-title"> Detection Settings </h2>
-
-                <form action="/settingChange" method="POST">
-                    <fieldset style="margin-bottom:2.5%;">
-                        <legend style="margin-left:2.5%;">Time Bucket Settings:</legend>
-                        <div style="margin-left:5%; margin-bottom:10px;">
-                            <label for="timeUnit">Time Unit:</label>
-                            <select id="timeUnit" name="unit">
-                                <option value="minutes">Minutes</option>
-                                <option value="hours" selected>Hours</option>
-                                <option value="days">Days</option>
-                                <option value="weeks">Weeks</option>
-                                <option value="months">Months</option>
-                                <option value="years">Years</option>
-                            </select>
-                        </div>
-
-                        <div style="margin-left:5%;">
-                            <label for="amountSlider">
-                                Amount: <span id="amountValue">1</span>
-                            </label><br>
-
-                            <input type="range" id="amountSlider" name="amount" min="1" max="24" value="1"
-                                oninput="document.getElementById('amountValue').innerText = this.value;">
-                        </div>
-                    </fieldset>
-
-                    <fieldset style="margin-bottom:2.5%;">
-                        <legend style="margin-left:2.5%;">Choose what classes are enabled:</legend>
-
-                        <div style="margin-left: 5%;">
-                            <input type='hidden' value='off' name='Convertible'>
-                            <input type="checkbox" id="Convertible" name="Convertible" checked />
-                            <label for="Convertible">Convertible</label>
-                        </div>
-
-                        <div style="margin-left: 5%;">
-                            <input type='hidden' value='off' name='Coupe'>
-                            <input type="checkbox" id="Coupe" name="Coupe" checked />
-                            <label for="Coupe">Coupe</label>
-                        </div>
-
-                        <div style="margin-left: 5%;">
-                            <input type='hidden' value='off' name='Hatchback'>
-                            <input type="checkbox" id="Hatchback" name="Hatchback" checked />
-                            <label for="Hatchback">Hatchback</label>
-                        </div>
-
-                        <div style="margin-left: 5%;">
-                            <input type='hidden' value='off' name='Pick-Up'>
-                            <input type="checkbox" id="Pick-Up" name="Pick-Up" checked />
-                            <label for="Pick-Up">Pick-Up</label>
-                        </div>
-                        <div style="margin-left: 5%;">
-                            <input type='hidden' value='off' name='Sedan'>
-                            <input type="checkbox" id="Sedan" name="Sedan" checked />
-                            <label for="Sedan">Sedan</label>
-                        </div>
-                        <div style="margin-left: 5%;">
-                            <input type='hidden' value='off' name='SUV'>
-                            <input type="checkbox" id="SUV" name="SUV" checked />
-                            <label for="SUV">SUV</label>
-                        </div>
-                        <div style="margin-left: 5%;">
-                            <input type='hidden' value='off' name='VAN'>
-                            <input type="checkbox" id="VAN" name="VAN" checked />
-                            <label for="VAN">Van</label>
-                        </div>
-                    </fieldset>
-
-                    <fieldset>
-                        <legend style="margin-left:2.5%">Maximum Pattern Delay:</legend>
-
-                        <div style="margin-left: 5%;">
-                            <input type="range" id="time" name="time" checked />
-                            <label for="time"> 12 Hours - 30 Days</label>
-                        </div>
-                    </fieldset>
-
-                    <input type="submit" style="margin:auto; margin-top: 2.5%;">
-                </form>
-
-            </div>
-        </div>
-    </div>
-
     <nav>
         <div class="nav-logo">WorkSpace</div>
         <a href="{{ url_for('patterns') }}" id="patterns-active">
@@ -129,14 +40,14 @@
             </svg>
             Files
         </a>
-        <a href="{{ url_for('download_csv') }}">
+        <a onclick="showExportPopup()">
             <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                 <circle cx="12" cy="12" r="3" />
                 <path d="M19.07 4.93A10 10 0 1 0 4.93 19.07" />
             </svg>
             Export
         </a>
-        <a onclick="openConfigMenu()">
+        <a onclick="showSettingsPopup()">
             <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
                 stroke-linecap="round" stroke-linejoin="round" class="settings-icon">
                 <circle cx="12" cy="12" r="3"></circle>
@@ -150,6 +61,15 @@
     {% block content %}
     
     {% endblock %}
+    
+    <div class="popup-overlay" id="remove-popup">
+        <div class="popup-card">
+            <div class="popup-title"></div>
+            <div class="popup-body" id="popup-body"></div>
+            <div class="popup-actions" id="popup-actions"></div>
+        </div>
+    </div>
+    <div id="toast"></div>
 
     <script defer src="{{ url_for('static', filename='JS/base.js') }}"></script>
     {% block scripts %}

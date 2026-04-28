@@ -1,7 +1,7 @@
 @import url('https://fonts.googleapis.com/css2?family=DM+Sans:wght@300;400;500;600&family=DM+Mono:wght@400;500&display=swap');
 
 :root {
-    --bg: #eeeeee;
+    --bg: #f6f5f5;
     --card: #ffffff;
     --border: #e6e6e6;
     --text: #2d2d2d;
@@ -91,7 +91,7 @@ nav a.active svg {
 
 .main {
     overflow-y: auto;
-    width:100%;
+    width: 100%;
     display: flex;
     flex-direction: row;
     align-items: flex-start;
@@ -105,40 +105,14 @@ nav a.active svg {
     display: flex;
     flex-direction: column;
     overflow: hidden;
-    height:100%;
-}
-
-.modal-backdrop
-{
-    position: fixed;
-    top: 0;
-    left: 0;
-    width: 100%;
-    height: 100vh;
-    background: rgba(0, 0, 0, 0.5);
-    z-index: 100;
-}
-
-.config-menu {
-    position: absolute;
-    top: 50%;
-    left: 50%;
-    transform: translate(-50%, -50%);
-    z-index: 101;
+    height: 100%;
 }
 
 .hidden {
     display: none;
 }
 
-.config-menu .card
-{
-    width: 50vw;
-    padding: 5%;
-}
-
-.btn
-{
+.btn {
     background: none;
     border: 1px solid var(--border);
     color: var(--blue);
@@ -151,12 +125,30 @@ nav a.active svg {
     transition: background 0.12s, border-color 0.12s;
 }
 
-.btn:hover
-{
+.btn:hover {
     background: var(--blue-light);
     border-color: var(--blue);
 }
 
+.remove-btn {
+    background: none;
+    border: 1px solid transparent;
+    border-color: var(--red-light);
+    color: var(--red);
+    font-size: 12px;
+    font-weight: 500;
+    font-family: 'DM Sans', sans-serif;
+    padding: 4px 10px;
+    border-radius: 6px;
+    cursor: pointer;
+    white-space: nowrap;
+    transition: background 0.12s, border-color 0.12s, color 0.12s;
+}
+
+.remove-btn:hover {
+    border-color: var(--red);
+    background: var(--red-light);
+}
 
 .card {
     background: var(--card);
@@ -174,16 +166,106 @@ nav a.active svg {
     flex-shrink: 0;
 }
 
+
+.popup-overlay {
+    display: none;
+    position: fixed;
+    inset: 0;
+    background: rgba(0, 0, 0, 0.4);
+    z-index: 200;
+    align-items: center;
+    justify-content: center;
+}
+
+.popup-overlay.visible {
+    display: flex;
+}
+
+.popup-card {
+    background: var(--card);
+    border-radius: 12px;
+    padding: 24px;
+    width: 420px;
+    max-width: calc(100vw - 40px);
+    box-shadow: 0 8px 40px rgba(0, 0, 0, 0.18);
+    display: flex;
+    flex-direction: column;
+    gap: 14px;
+}
+
+.popup-title {
+    font-size: 15px;
+    font-weight: 600;
+    color: var(--text);
+    text-align: center;
+}
+
+.popup-body {
+    font-size: 13px;
+    color: var(--muted);
+    line-height: 1.6;
+}
+
+.popup-actions {
+    display: flex;
+    gap: 8px;
+    justify-content: center;
+    flex-wrap: wrap;
+}
+
+.popup-btn {
+    font-size: 12.5px;
+    font-weight: 500;
+    font-family: 'DM Sans', sans-serif;
+    padding: 6px 14px;
+    border-radius: 7px;
+    cursor: pointer;
+    border: 1px solid var(--border);
+    transition: background 0.12s, border-color 0.12s;
+}
+
+.popup-btn.secondary {
+    background: none;
+    color: var(--text);
+}
+
+.popup-btn.secondary:hover {
+    background: var(--bg);
+}
+
+.popup-btn.danger {
+    background: var(--red);
+    color: #fff;
+    border-color: var(--red);
+}
+
+.popup-btn.danger:hover {
+    background: #dc2626;
+}
+
+.popup-check-item {
+    margin-left:15px;
+}
+
+legend {
+    margin-left: 5px;
+}
+
+fieldset label
+{
+    margin-left: 5px;
+}
+
 @media screen and (max-width: 768px) {
     .main {
         flex: 1;
         display: flex;
         flex-direction: column;
-        
+
     }
 
     .full-card {
-        width:100vw;
+        width: 100vw;
     }
 
     body {
@@ -194,7 +276,7 @@ nav a.active svg {
         justify-content: center;
         width: 100%;
         flex-direction: row;
-        height:10vh;
+        height: 10vh;
     }
 
     .nav-logo {
@@ -211,23 +293,16 @@ nav a.active svg {
         height: 25px;
     }
 
-    .config-menu
-    {
+    .config-menu {
         top: 0;
         left: 0;
         transform: unset;
     }
 
-    .config-menu .card
-    {   
+    .config-menu .card {
         border-radius: 0px;
         margin: 0px;
         width: 100vw;
         height: 90vh;
-    }
-    
-    .modal-backdrop
-    {
-        background-color: unset;
     }
 }
