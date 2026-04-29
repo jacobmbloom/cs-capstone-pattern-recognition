@@ -1,6 +1,6 @@
 # cs-capstone-pattern-recognition
 
-this is a python based web application for users to upload image files for classification and pattern detection. We trained a YOLOv8 model on traffic camera footage to classify cars in images, and then use those classificaitons to find patterns within the data. The primary focus is to detect patterns within the images based on a time or classification.
+This is a python based web application for users to upload image files for classification and pattern detection. We trained a YOLOv8 model on traffic camera footage to classify cars in images, and then use those classificaitons to find patterns within the data. The primary focus is to detect patterns within the images based on a time or classification.
 
 ## project requirements
 
