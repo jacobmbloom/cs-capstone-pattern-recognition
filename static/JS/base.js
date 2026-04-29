@@ -61,7 +61,6 @@ function showSettingsPopup()
             { label: 'Save', cls: '', fn: () => {
                 const data = new FormData();
                 document.querySelectorAll('input[name="classes[]"]:checked').forEach(cb => data.append('classes[]', cb.value));
-                data.append('time', document.getElementById('time').value);
                 fetch('/settingChange', { method: 'POST', body: data })
                     .then(() => closePopup());
             }},
