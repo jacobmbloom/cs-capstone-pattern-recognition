@@ -17,6 +17,7 @@ INPUT_NAME = MODEL.get_inputs()[0].name
 
 print(MODEL.get_inputs()[0].shape)
 
+# classes for possible detections
 VALID_YOLO_CLASSES = {"car", "truck", "bus"}
 CLASS_NAMES = [
         "SEDAN",
@@ -29,6 +30,7 @@ CLASS_NAMES = [
 GRAPH_FIGSIZE = (9, 5)
 GRAPH_DPI     = 200
 
+# color map so each class has an associated color for visualizations
 CLASS_COLORS = {
     "SEDAN": "#4C72B0",
     "SEMI":  "#DD8452",
@@ -37,17 +39,22 @@ CLASS_COLORS = {
     "VAN":   "#8172B2",
 }
 
+# gets the given color for a specific classificaiton
 def _class_color(label: str) -> str:
     """Return the canonical colour for a class label."""
     return CLASS_COLORS.get(label, "#999999")
 
+# applies formatting defaults to all visuals
 def _apply_graph_defaults(fig, ax_list=None):
     """Apply tight_layout with consistent padding so nothing is clipped."""
     fig.tight_layout(pad=1.5)
     return fig
 
+
+
 prediction_log = {}
 
+# logic for removing predictions for all uploads
 def purgePrediction(fileDirectory):
     prediction_log.pop(fileDirectory, None)
 
@@ -62,6 +69,8 @@ def removePredictions(fileDirectory, filenames):
     ]
     print(prediction_log)
 
+
+# function that gets called to get bounding box and image classifications
 def process(
         img_path: str,
         final_path: str,
@@ -87,6 +96,7 @@ def process(
 
     detections = []
 
+    # loop through found detections
     for result in results:
         for box in result.boxes:
             cls = int(box.cls[0])
@@ -117,7 +127,7 @@ def process(
             new_x2 = int(x2 * scale_x)
             new_y2 = int(y2 * scale_y)
 
-            # Draw
+            # Draw bounding box around the detected vehicles 
             cv2.rectangle(resized_image, (new_x1, new_y1), (new_x2, new_y2), (0, 255, 0), 3)
             cv2.putText(
                 resized_image,
@@ -151,6 +161,7 @@ def process(
         "detections": detections
     }
 
+# similar loop gets called for image processing
 def image_processing(
     user_session_id: str,
     input_path: str,
@@ -267,6 +278,7 @@ def image_processing(
         "num_detections": len(prediction_log.get(user_session_id, []))
     }
 
+# main processing specifially for csv's that are uploaded from previous classifications
 def csv_processing(
     user_session_id: str,
     csv_path: str,
@@ -342,7 +354,7 @@ def csv_processing(
         "source": "csv",
     }
 
-
+# get our timestamp into a usable form with regex
 TIMESTAMP_REGEX = re.compile(r"^(\d{4}-\d{2}-\d{2}) (\d{6})")
 
 def extract_timestamp(filename: str) -> datetime:
@@ -358,6 +370,7 @@ def extract_timestamp(filename: str) -> datetime:
 
     return datetime.strptime(f"{date_part} {time_part}", "%Y-%m-%d %H%M%S")
 
+# gets our visualization for the overall timeline of images in the order they are given to us
 def plot_prediction_timeline(fileDirectory : str):
     if fileDirectory not in prediction_log or not prediction_log[fileDirectory]:
         return None
@@ -373,6 +386,7 @@ def plot_prediction_timeline(fileDirectory : str):
 
     fig, ax = plt.subplots(figsize=GRAPH_FIGSIZE, dpi=GRAPH_DPI)
 
+    # make sure each is rendering with is associated color
     colors = [_class_color(lbl) for lbl in df["label"]]
     ax.scatter(df["index"], df["label_id"], c=colors, zorder=3)
 
@@ -384,16 +398,19 @@ def plot_prediction_timeline(fileDirectory : str):
     _apply_graph_defaults(fig)
     return fig
 
+# visualization for the overall occurence of each classification
 def plot_prediction_frequency(fileDirectory : str):
     if fileDirectory not in prediction_log or not prediction_log[fileDirectory]:
         return None
 
     df = pd.DataFrame(prediction_log[fileDirectory])
 
+    # get total counts for each type of class
     car_counts = df['label'].value_counts()
 
     fig, ax = plt.subplots(figsize=GRAPH_FIGSIZE, dpi=GRAPH_DPI)
 
+    # make sure each class is color codede
     bar_colors = [_class_color(lbl) for lbl in car_counts.index]
     ax.bar(car_counts.index, car_counts.values, color=bar_colors)
 
@@ -405,6 +422,7 @@ def plot_prediction_frequency(fileDirectory : str):
     _apply_graph_defaults(fig)
     return fig
 
+# visualization for the confidance of classes over time
 def plot_confidence_distribution(fileDirectory : str):
     if fileDirectory not in prediction_log or not prediction_log[fileDirectory]:
         return None
@@ -420,6 +438,7 @@ def plot_confidence_distribution(fileDirectory : str):
     _apply_graph_defaults(fig)
     return fig
 
+# visualization for the overall average confidance our model had for each classification
 def plot_confidence_per_class(fileDirectory : str):
     if fileDirectory not in prediction_log or not prediction_log[fileDirectory]:
         return None
@@ -441,6 +460,7 @@ def plot_confidence_per_class(fileDirectory : str):
     _apply_graph_defaults(fig)
     return fig
 
+# visualize the total disripbution for each classification
 def plot_cumulative_classes(fileDirectory: str):
     if fileDirectory not in prediction_log or not prediction_log[fileDirectory]:
         return None
@@ -463,6 +483,7 @@ def plot_cumulative_classes(fileDirectory: str):
     _apply_graph_defaults(fig)
     return fig, ax
 
+# visualizes if we detect mutliple cars in a single image and where it occured, and how many of each
 def plot_detections_per_image(fileDirectory : str):
     if fileDirectory not in prediction_log or not prediction_log[fileDirectory]:
         return None
@@ -546,7 +567,7 @@ def get_repetition_patterns(fileDirectory : str):
 
     return patterns
 
-
+# plot where those repetition patterns occur and how long they happen for
 def plot_repetition_patterns(fileDirectory : str):
     patterns = get_repetition_patterns(fileDirectory)
 
@@ -609,6 +630,7 @@ def get_occurrence_patterns(fileDirectory : str):
 
     return results
 
+# used to format the occurence information / patterns. based on when the patterns occur
 def get_page_format_occurrence(fileDirectory: str):
     patterns = get_occurrence_patterns(fileDirectory)
 
@@ -641,6 +663,7 @@ def get_page_format_occurrence(fileDirectory: str):
 
     return output
 
+# plots the patterns found based on time
 def plot_occurrence_patterns(fileDirectory : str):
     patterns = get_occurrence_patterns(fileDirectory)
 
@@ -665,6 +688,7 @@ def plot_occurrence_patterns(fileDirectory : str):
     _apply_graph_defaults(fig)
     return fig
 
+# plot all patterns that were found based on when the occured
 def plot_occurrence_timeline(fileDirectory : str):
     patterns = get_occurrence_patterns(fileDirectory)
 
@@ -726,6 +750,7 @@ def get_sequential_patterns(fileDirectory : str):
 
     return found_patterns
 
+# visalize all sequential patterns and how many of each we had and what the seuence was
 def plot_sequential_patterns(fileDirectory : str):
     patterns = get_sequential_patterns(fileDirectory)
 
@@ -749,6 +774,7 @@ def plot_sequential_patterns(fileDirectory : str):
     _apply_graph_defaults(fig)
     return fig
 
+# shows the timeline of when each sequence happened
 def plot_sequential_timeline(fileDirectory : str):
     patterns = get_sequential_patterns(fileDirectory)
 
@@ -771,6 +797,7 @@ def plot_sequential_timeline(fileDirectory : str):
     _apply_graph_defaults(fig)
     return fig
 
+# gives the 
 def export_predictions(fileDirectory : str):
     output = StringIO()
     df = pd.DataFrame(prediction_log[fileDirectory])
@@ -778,11 +805,13 @@ def export_predictions(fileDirectory : str):
     output.seek(0)
     return output.getvalue()
 
+
+"""
+Converts detections into a binned time series.
+Returns the series array and the bin edges as timestamps.
+"""
 def build_time_series(label_df: pd.DataFrame, bin_minutes: int = 15):
-    """
-    Converts detections into a binned time series.
-    Returns the series array and the bin edges as timestamps.
-    """
+   
     origin = label_df["timestamp"].min()
     end = label_df["timestamp"].max()
 
@@ -798,6 +827,7 @@ def build_time_series(label_df: pd.DataFrame, bin_minutes: int = 15):
 
     return series, origin, bin_minutes
 
+# gets time based pattern periods for when the patterns occur
 def find_recurrence_periods(series, bin_minutes: int, min_period_minutes: int = 30):
 
     # Normalize
@@ -830,6 +860,7 @@ def find_recurrence_periods(series, bin_minutes: int, min_period_minutes: int = 
     periods.sort(key=lambda x: -x["strength"])
     return periods, autocorr_smooth
 
+# formats our image timestamp labeling
 def format_period(minutes: int) -> str:
     """Human readable period label."""
     if minutes < 60:
@@ -844,6 +875,7 @@ def format_period(minutes: int) -> str:
         weeks = round(minutes / 10080, 1)
         return f"{weeks}wk"
 
+# gets the data for the time based patterns and returns them
 def get_occurrences_for_period(label_df: pd.DataFrame, period_minutes: int, window_minutes: int = -1):
     if window_minutes < 0:
         window_minutes = max(15, int(period_minutes * 0.10))
@@ -893,7 +925,7 @@ def get_occurrences_for_period(label_df: pd.DataFrame, period_minutes: int, wind
 
     return groups
 
-
+#gets patterns and the impormation assocaited with each
 def get_time_patterns(fileDirectory: str, bin_minutes: int = 15, min_occurrences: int = 2):
     if fileDirectory not in prediction_log or not prediction_log[fileDirectory]:
         return None
@@ -949,11 +981,12 @@ def get_time_patterns(fileDirectory: str, bin_minutes: int = 15, min_occurrences
 
     return results
 
+"""
+Converts get_time_patterns() output into the format expected by patterns.html.
+Each detected period per vehicle becomes its own pattern card in the sidebar.
+"""
 def get_page_format_patterns(fileDirectory: str, bin_minutes: int = 15, min_occurrences: int = 2):
-    """
-    Converts get_time_patterns() output into the format expected by patterns.html.
-    Each detected period per vehicle becomes its own pattern card in the sidebar.
-    """
+    
     raw = get_time_patterns(fileDirectory, bin_minutes=bin_minutes, min_occurrences=min_occurrences)
 
     if not raw:
