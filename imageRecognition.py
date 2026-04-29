@@ -2,7 +2,6 @@ from ultralytics import YOLO
 import onnxruntime as ort
 import cv2
 import numpy as np
-import tensorflow as tf
 import os
 import pandas as pd
 import matplotlib.pyplot as plt
