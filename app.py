@@ -11,6 +11,7 @@ import threading
 
 from imageRecognition import *
 
+# App setup
 app = Flask(__name__)
 app.secret_key = "your_very_secret_and_unique_key"
 
@@ -31,22 +32,27 @@ settingManager = {}
 lastSeen = {}                     #dict[str, float]
 lastSeenLock = threading.Lock()
 
-
 ###########
 # Utility #
 ###########
 
 def checkdependencies(path: str):
+    """
+    Search CSV files and find all images its dependent on
+    Returns the list of all dependencies
+    """
     if not os.path.exists(path):
         return "File not found"
 
     df = pd.read_csv(path)
 
+    # Not dependent on any files
     if "filename" not in df.columns:
         return "File does not contain media references"
 
-    print(list(df["filename"].unique()))
+    # Return list of dependent files
     return list(df["filename"].unique())
+
 
 def _find_csv_for_file(file_directory: str, filename: str):
     """
@@ -68,7 +74,12 @@ def _find_csv_for_file(file_directory: str, filename: str):
 
 
 def runImageProcessing(files, ws, file_directory):
+    """
+    Proecss all images in directory
+    Takes in files, websocket, directory
 
+    Returns progress and results to UI
+    """
     # Build active class filter from settings (None = allow all)
     valid = None
     if file_directory in settingManager:
@@ -76,6 +87,7 @@ def runImageProcessing(files, ws, file_directory):
         if active:
             valid = active
 
+    # Opening each file
     for i, file in enumerate(files):
         try:
             filename    = os.path.basename(file)
@@ -114,7 +126,6 @@ def runImageProcessing(files, ws, file_directory):
                 "progress": int((i + 1) / len(files) * 100),
                 "result":   result,
             }))
-            print("Clean")
 
         except Exception as e:
             ws.send(json.dumps({
@@ -125,6 +136,7 @@ def runImageProcessing(files, ws, file_directory):
 
     ws.send(json.dumps({"type": "done"}))
 
+
 ################
 # User Cleanup #
 ################
@@ -133,6 +145,7 @@ def touch(file_directory: str) -> None:
     """Record that a user just interacted with the server."""
     with lastSeenLock:
         lastSeen[file_directory] = time.time()
+
 
 def _purge_user(file_directory: str) -> None:
     """Delete all uploaded/result files for one user and remove them from memory."""
@@ -150,6 +163,7 @@ def _purge_user(file_directory: str) -> None:
  
     print(f"[cleanup] Purged data for session directory: {file_directory}")
 
+
 def _cleanup_loop() -> None:
     """Background thread: periodically evict stale user data."""
     while True:
@@ -161,13 +175,14 @@ def _cleanup_loop() -> None:
         for file_directory in stale:
             _purge_user(file_directory)
 
+# Cleanup Thread Startup
 cleanupThread = threading.Thread(target=_cleanup_loop, daemon=True, name="file-cleanup")
 cleanupThread.start()
 
 ###############
 # HTTP Routes #
 ###############
-
+# Home / Files Route
 @app.route("/")
 @app.route("/files")
 def files():
@@ -180,12 +195,14 @@ def files():
 
     return render_template("files.html")    
 
+# Visualizations Route
 @app.route("/visualizations")
 def visualizations():
     if "fileDirectory" not in session:
         redirect("/files")
     return render_template("visualizations.html")
 
+# Patterns Route
 @app.route("/patterns")
 def patterns():
     if "fileDirectory" not in session:
@@ -193,6 +210,7 @@ def patterns():
     raw_patterns = get_page_format_patterns(session["fileDirectory"])
 
     return render_template("patterns.html", patterns=raw_patterns)  
+
 
 ##################
 # Dynamic Routes #
@@ -237,13 +255,13 @@ def get_plot(plotname: str):
 
     #   write figure image to buffer
     buf = BytesIO()
-    print(type(fig))
     fig.savefig(buf, format="png")
     buf.seek(0)
 
     # Return image response
     return Response(buf.getvalue(), mimetype="image/png")
 
+# Dynamic grab for processed results
 @app.route("/results/<path:filename>")
 def get_file(filename):
     return send_from_directory(
@@ -254,20 +272,18 @@ def get_file(filename):
 ##############
 # API Routes #
 ##############
-
+# Get Uploads API
 @app.route("/api/getUploads", methods=["GET"])
 def api_getUploads():
     if "fileDirectory" not in session:
         return { "files" : [] }
 
-    print(len(fileManager[session["fileDirectory"]]))
     return { "files": fileManager[session["fileDirectory"]] }
 
+# Save Uploads API
 @app.route("/api/saveUploads", methods=["POST"])
 def api_saveUploads():
     data = request.get_json() 
-    
-    print(data)
 
     if not isinstance(data, list):
         return jsonify({"error": "Expected a list of objects"}), 400
@@ -299,6 +315,7 @@ def api_saveUploads():
         "count": len(data)
     }), 200
 
+# Upload API
 @app.route("/api/upload", methods=["POST"])
 def api_upload():
     """
@@ -329,6 +346,7 @@ def api_upload():
 
     return results
 
+# Remove API
 @app.route("/api/remove", methods=["POST"])
 def api_remove():
     if "fileDirectory" not in session:
@@ -372,6 +390,7 @@ def api_remove():
         "not_found": not_found
     }), 200
 
+# Settings changed API
 @app.route("/settingChange", methods=["POST"])
 def settingsChange():
     if "fileDirectory" not in session:
@@ -385,6 +404,7 @@ def settingsChange():
 
     return redirect("/files")
 
+# Export data API
 @app.route("/api/export")
 def download_csv():
     return Response(
@@ -396,7 +416,6 @@ def download_csv():
 #################
 # Socket Events #
 #################
-
 @sock.route("/process/<fileId>")
 def socket_process(ws, fileId):
     print(f"WebSocket connected: {fileId}")
@@ -411,6 +430,7 @@ def socket_process(ws, fileId):
     runImageProcessing([fileId], ws, file_directory)
 
     print(f"WebSocket disconnected for file: {fileId}")
-    
+
+
 if __name__ == "__main__":
     app.run(debug=True)
