@@ -41,3 +41,6 @@ This is a python based web application for users to upload image files for class
   * Open site through local host
 
 ## demo / how to use
+
+https://github.com/user-attachments/assets/508ebcfd-9b68-44a8-98c9-0e917e45b2fa
+
