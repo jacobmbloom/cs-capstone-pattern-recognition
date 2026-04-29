@@ -1,78 +1,118 @@
-/*
-  Expected shape of pattern.frames (passed via data-frames on each .pat-item):
-  [
-    { "timestamp": "2025-04-21T07:47:23", "url": "/static/frames/abc.jpg" },
-    ...
-  ]
-  Frames should already be sorted oldest → newest by the server.
-*/
 
-const TAG_CLASSES = {
-    daily: 'tag-daily', vehicle: 'tag-vehicle',
-    person: 'tag-person', anomaly: 'tag-anomaly', recurring: 'tag-recurring'
-};
-
+//  Name with which to store pattern in session
 const SESSION_KEY = 'patterns_active_id';
 
 let activePattern = null;   // the currently selected pattern object
 let activeFrames  = [];     // parsed frames array for active pattern
-let viewMode      = 'grid';
-let tlPct         = 0;
+let viewMode      = 'grid'; // state of the view
+let tlPct         = 0;      // timeline postion
 
-function fmtTime(d) {
+/**
+ * Formate a datetime object to time string
+ * @param {Object} d A datetime object to format
+ * @returns {String} String representation of that time
+ */
+function fmtTime(d)
+{
     return d.toTimeString().slice(0, 8);
 }
 
+/**
+ * Formate a datetime object to date string
+ * @param {Object} d A datetime object to format
+ * @returns {String} String representation of that date
+ */
 function fmtDate(d) {
     return d.toLocaleDateString('en-GB', { weekday: 'short', day: 'numeric', month: 'short', year: 'numeric' });
 }
 
-function saveSession(id) {
+/**
+ * Save the id of the currently selected pattern to usersession so it can loaded later
+ * @param {int} id The currently selected id of a pattern
+ * @returns {void} 
+ */
+function saveSession(id){
     try { sessionStorage.setItem(SESSION_KEY, id); } catch (_) {}
 }
 
+/**
+ * Loads a saved id if one exists, otherwise null
+ * @returns {int} pattern id or null
+ */
 function loadSession() {
     try { return sessionStorage.getItem(SESSION_KEY); } catch (_) { return null; }
 }
 
+/**
+ * Erase a stored id from the session
+ * @returns {void} 
+ */
 function clearSession() {
     try { sessionStorage.removeItem(SESSION_KEY); } catch (_) {}
 }
 
-function selectPatternEl(el) {
+/**
+ * Select the given pattern to be the newly selected one
+ * @param {Element} el The html element corrisponding to a pattern from the pattern list
+ * @returns {void}
+ */
+function selectPatternEl(el)
+{
+    //  Set all other patterns to be inactive, then make the selected one active
     document.querySelectorAll('.pat-item').forEach(i => i.classList.remove('active'));
     el.classList.add('active');
+    //  Move the pattern 
     el.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
 
+    //  Get the information about said pattern, and move it to the global variables for it
     activePattern = { id: el.dataset.id, name: el.querySelector('.pat-name').textContent };
     activeFrames  = JSON.parse(el.dataset.frames).map(f => ({
         ...f,
         ts: new Date(f.timestamp)
     }));
 
+    //  Save the selection to user session, then update view
     saveSession(activePattern.id);
     renderFeed();
 }
 
-function filterSidebar(q) {
+/**
+ * Filter the list of patterns of the right side by the given query
+ * @param {String} q the current search query
+ * @returns {void}
+ */
+function filterSidebar(q)
+{
     document.querySelectorAll('.pat-item').forEach(el => {
+        //  get all of the names and descriptions for each pattern
         const name = el.querySelector('.pat-name').textContent.toLowerCase();
         const desc = el.querySelector('.pat-desc').textContent.toLowerCase();
+
+        //  if the query does not exist, show everything, else
+        //      if the quesry is not in the name or description, hide the element
         el.style.display = (!q || name.includes(q) || desc.includes(q)) ? '' : 'none';
     });
 }
 
+//  Set a click listener for every item in the pattern menu
+//      if clicked, show that pattern to main view
 document.querySelectorAll('.pat-item').forEach(el => {
     el.addEventListener('click', () => selectPatternEl(el));
 });
 
+//  If the search bar content changes, try filtering the list again
 document.getElementById('pat-search').addEventListener('input', e => filterSidebar(e.target.value.toLowerCase()));
 
+/**
+ * Renders all of the new content based on the selected pattern.
+ * @returns {void}
+ */
 function renderFeed() {
     const feed  = document.getElementById('feed');
     const title = document.getElementById('c-title');
     const sub   = document.getElementById('c-sub');
 
+    //  If no pattern is selected, render a default empty block
     if (!activePattern) {
         title.textContent = 'Select a pattern';
         sub.textContent   = 'Choose a detected pattern from the panel on the right';
@@ -90,6 +130,7 @@ function renderFeed() {
         return sec >= minSec;
     });
 
+    //  if filter removes all, show a message
     if (!frames.length) {
         feed.innerHTML = '<div class="empty-feed">No frames after selected time</div>';
         return;
@@ -103,6 +144,7 @@ function renderFeed() {
         byDay[dk].frames.push(f);
     });
 
+    //  based on the selcted view state, change which block is shown
     let html = '';
     Object.values(byDay).forEach(day => {
         html += `<div class="day-sep">
@@ -111,6 +153,7 @@ function renderFeed() {
             <div class="day-line"></div>
         </div>`;
 
+        //  grid mode, larger picture and multiple per block
         if (viewMode === 'grid') {
             html += `<div class="grid-view">`;
             day.frames.forEach(f => {
@@ -122,6 +165,7 @@ function renderFeed() {
                 </div>`;
             });
             html += `</div>`;
+        //  list mode, smaller pictures single entry per line
         } else {
             html += `<div class="list-view">`;
             day.frames.forEach(f => {
@@ -139,6 +183,7 @@ function renderFeed() {
     feed.innerHTML = html;
 }
 
+//  add event listeners to the grid selector
 document.getElementById('btn-grid').addEventListener('click', () => {
     viewMode = 'grid';
     document.getElementById('btn-grid').classList.add('active');
@@ -146,6 +191,7 @@ document.getElementById('btn-grid').addEventListener('click', () => {
     renderFeed();
 });
 
+//  add event listeners to the list selectors
 document.getElementById('btn-list').addEventListener('click', () => {
     viewMode = 'list';
     document.getElementById('btn-list').classList.add('active');
@@ -153,6 +199,8 @@ document.getElementById('btn-list').addEventListener('click', () => {
     renderFeed();
 });
 
+//  when rendering in mobile mode, the regular pattern selector is hidden
+//  instead a full down menu is shown
 const drawer = (function () {
     const sidebar   = document.querySelector('.sidebar');
     const backdrop  = document.getElementById('sidebar-backdrop');
@@ -220,6 +268,7 @@ const drawer = (function () {
     }
 })();
 
+//  this is what sets up the magnified view when an image is clicked from the main view
 const lightbox = (function () {
     const lb        = document.getElementById('lightbox');
     const lbImg     = document.getElementById('lb-img');

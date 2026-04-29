@@ -975,7 +975,7 @@ function uploadMissing(id)
     //  Create a hidden file input form
     const picker = document.createElement('input');
     picker.type = 'file';
-    picker.accept = '.mp4,.mov,.jpg,.jpeg,.png,.webm,.csv';
+    picker.accept = '.jpg,.jpeg,.png,.webm,.csv';
 
     //  Code that runs once file is submited
     picker.onchange = () => {

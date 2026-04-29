@@ -41,6 +41,7 @@ function showPopup(title, bodyHTML, actions)
  */
 function closePopup()
 {
+    console.log("TEST")
     document.getElementById('remove-popup').classList.remove('visible');
 }
 
