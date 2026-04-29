@@ -184,7 +184,7 @@ def files():
 def visualizations():
     if "fileDirectory" not in session:
         redirect("/files")
-    return render_template("results.html")
+    return render_template("visualizations.html")
 
 @app.route("/patterns")
 def patterns():
