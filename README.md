@@ -8,23 +8,23 @@ This is a python based web application for users to upload image files for class
   
   * Python Packages: 
   
-  * Flask 3.0.3 
-  
-  * Flask-sock 0.7.0 
-  
-  * Ultralytics 8.4.45 
-  
-  * Onnxruntime 1.19.2 
-  
-  * Yolo 0.3.1 
-  
-  * Numpy 1.24.4 
-  
-  * Pandas 2.0.3 
-  
-  * Matplotlib 3.7.5 
-  
-  * Scipy 1.10.1
+   * Flask 3.0.3 
+   
+   * Flask-sock 0.7.0 
+   
+   * Ultralytics 8.4.45 
+   
+   * Onnxruntime 1.19.2 
+   
+   * Yolo 0.3.1 
+   
+   * Numpy 1.24.4 
+   
+   * Pandas 2.0.3 
+   
+   * Matplotlib 3.7.5 
+   
+   * Scipy 1.10.1
 
 ## setup proocess
   
