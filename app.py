@@ -83,9 +83,7 @@ def runImageProcessing(files, ws, file_directory):
     # Build active class filter from settings (None = allow all)
     valid = None
     if file_directory in settingManager:
-        active = [s for s, state in settingManager[file_directory].items() if state == "on"]
-        if active:
-            valid = active
+        valid = settingManager.get(file_directory)
 
     # Opening each file
     for i, file in enumerate(files):
@@ -396,11 +394,11 @@ def settingsChange():
     if "fileDirectory" not in session:
         return redirect("/")
 
-    data = dict(request.form)
+    classes = request.form.getlist('classes[]')
+    
+    print(classes)
 
-    print(data)
-
-    settingManager[session["fileDirectory"]] = data
+    settingManager[session["fileDirectory"]] = classes
 
     return redirect("/files")
 
